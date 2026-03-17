@@ -424,6 +424,13 @@ document.getElementById('saveConfig').addEventListener('click', async () => {
 
 document.getElementById('applyFilter').addEventListener('click', () => loadLogs(1));
 
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const filters = getFilters();
+  const params = new URLSearchParams(filters);
+  const url = `${API_BASE}/api/logs/export?${params}`;
+  window.open(url, '_blank');
+});
+
 document.getElementById('prevPage').addEventListener('click', () => {
   if (currentPage > 1) loadLogs(currentPage - 1);
 });

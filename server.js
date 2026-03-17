@@ -479,6 +479,50 @@ app.delete('/api/logs', (req, res) => {
   }
 });
 
+app.get('/api/logs/export', (req, res) => {
+  try {
+    const { start, end, source, level, search } = req.query;
+    
+    let query = 'SELECT timestamp, source, level, message, raw FROM logs WHERE 1=1';
+    const params = [];
+    
+    if (start) { query += ' AND timestamp >= ?'; params.push(start); }
+    if (end) { query += ' AND timestamp <= ?'; params.push(end); }
+    if (source) { query += ' AND source LIKE ?'; params.push(`%${source}%`); }
+    if (level) { query += ' AND level = ?'; params.push(level.toUpperCase()); }
+    if (search) { query += ' AND (message LIKE ? OR raw LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    
+    query += ' ORDER BY timestamp ASC';
+    
+    const stmt = db.prepare(query);
+    stmt.bind(params);
+    const logs = [];
+    while (stmt.step()) {
+      logs.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    const headers = ['timestamp', 'source', 'level', 'message', 'raw'];
+    const csvRows = [headers.join(',')];
+    
+    const escapeCsv = (str) => {
+      if (str === null || str === undefined) return '';
+      const s = String(str).replace(/"/g, '""');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+    };
+    
+    for (const log of logs) {
+      csvRows.push(headers.map(h => escapeCsv(log[h])).join(','));
+    }
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="ir-logs-${new Date().toISOString().slice(0,10)}.csv"`);
+    res.send(csvRows.join('\n'));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/stats', (req, res) => {
   try {
     let stmt = db.prepare('SELECT COUNT(*) as count FROM logs');
