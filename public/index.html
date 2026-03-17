@@ -61,6 +61,29 @@
     </div>
 
     <div class="timeline" id="timeline">
+      <div class="timeline-header">
+        <div class="log-header">
+          <div class="log-header-cell" data-col="timestamp" style="width: var(--col-timestamp-width, 180px);">
+            Timestamp
+            <div class="resize-handle"></div>
+          </div>
+          <div class="log-header-cell" data-col="level" style="width: var(--col-level-width, 70px);">
+            Level
+            <div class="resize-handle"></div>
+          </div>
+          <div class="log-header-cell" data-col="source" style="width: var(--col-source-width, 120px);">
+            Source
+            <div class="resize-handle"></div>
+          </div>
+          <div class="log-header-cell" data-col="extract" style="width: var(--col-extract-width, 150px);">
+            Indicators
+            <div class="resize-handle"></div>
+          </div>
+          <div class="log-header-cell" data-col="message" style="flex: 1;">
+            Message
+          </div>
+        </div>
+      </div>
       <div class="timeline-empty" id="emptyState">
         <div class="empty-icon">📋</div>
         <h2>No logs loaded</h2>

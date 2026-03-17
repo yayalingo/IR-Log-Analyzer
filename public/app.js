@@ -484,4 +484,52 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
+function initColumnResize() {
+  const resizeHandles = document.querySelectorAll('.resize-handle');
+  let currentHandle = null;
+  let startX = 0;
+  let startWidth = 0;
+  let colName = '';
+  
+  resizeHandles.forEach(handle => {
+    handle.addEventListener('mousedown', (e) => {
+      currentHandle = handle;
+      colName = handle.parentElement.dataset.col;
+      startX = e.pageX;
+      const cell = handle.parentElement;
+      startWidth = cell.offsetWidth;
+      handle.classList.add('active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!currentHandle) return;
+    
+    const diff = e.pageX - startX;
+    const newWidth = Math.max(50, Math.min(500, startWidth + diff));
+    
+    const root = document.documentElement;
+    const varName = `--col-${colName}-width`;
+    root.style.setProperty(varName, newWidth + 'px');
+    
+    const headerCell = document.querySelector(`.log-header-cell[data-col="${colName}"]`);
+    if (headerCell) {
+      headerCell.style.width = newWidth + 'px';
+    }
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (currentHandle) {
+      currentHandle.classList.remove('active');
+      currentHandle = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+}
+
+initColumnResize();
+
 loadLogs(1);

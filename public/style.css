@@ -193,6 +193,11 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--border);
   min-height: 400px;
+  overflow: hidden;
+}
+
+.timeline-header {
+  border-bottom: 1px solid var(--border);
 }
 
 .timeline-empty {
@@ -231,13 +236,45 @@ body {
 
 .log-entry {
   display: flex;
-  gap: 12px;
+  gap: 0;
   padding: 12px;
   border-radius: var(--radius-sm);
   margin-bottom: 4px;
   cursor: pointer;
   transition: background 0.15s;
   border-left: 3px solid transparent;
+}
+
+.log-header {
+  display: flex;
+  gap: 0;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.log-header-cell {
+  padding: 0 12px;
+  position: relative;
+  user-select: none;
+}
+
+.log-header-cell .resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.log-header-cell .resize-handle:hover,
+.log-header-cell .resize-handle.active {
+  background: var(--accent);
 }
 
 .log-entry:hover {
@@ -269,15 +306,20 @@ body {
 
 .log-timestamp {
   flex-shrink: 0;
-  width: 180px;
+  width: var(--col-timestamp-width, 180px);
+  min-width: 80px;
+  max-width: 400px;
   font-family: 'SF Mono', Monaco, monospace;
   font-size: 12px;
   color: var(--text-secondary);
+  padding: 0 12px;
 }
 
 .log-level {
   flex-shrink: 0;
-  width: 70px;
+  width: var(--col-level-width, 70px);
+  min-width: 50px;
+  max-width: 120px;
   font-size: 11px;
   font-weight: 600;
   padding: 2px 6px;
@@ -312,29 +354,37 @@ body {
 
 .log-source {
   flex-shrink: 0;
-  width: 120px;
+  width: var(--col-source-width, 120px);
+  min-width: 60px;
+  max-width: 300px;
   font-size: 12px;
   color: var(--accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0 12px;
 }
 
 .log-message {
   flex: 1;
+  min-width: 100px;
   font-size: 13px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0 12px;
 }
 
 .log-extract {
   flex-shrink: 0;
-  width: 150px;
+  width: var(--col-extract-width, 150px);
+  min-width: 80px;
+  max-width: 400px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  padding: 0 12px;
 }
 
 .extract-tag {

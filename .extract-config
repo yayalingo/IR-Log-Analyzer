@@ -1,0 +1,6 @@
+{
+  "ip": true,
+  "hostname": true,
+  "url": true,
+  "hash": true
+}
