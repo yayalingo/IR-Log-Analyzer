@@ -1,0 +1,7 @@
+node_modules/
+*.db
+*.db-journal
+.vt-key
+.env
+.DS_Store
+*.log

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IR Log Analyzer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <h1>IR Log Analyzer</h1>
+        <span class="badge" id="logCount">0 logs</span>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-secondary" id="configBtn">⚙️ Config</button>
+        <button class="btn btn-danger" id="clearBtn">Clear All</button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <button class="btn btn-primary" id="uploadBtn">📁 Upload File</button>
+        <button class="btn btn-primary" id="pasteBtn">📋 Paste Logs</button>
+      </div>
+      <div class="toolbar-filters">
+        <input type="text" id="searchInput" placeholder="Search logs..." class="input">
+        <select id="sourceFilter" class="input select">
+          <option value="">All Sources</option>
+        </select>
+        <select id="levelFilter" class="input select">
+          <option value="">All Levels</option>
+          <option value="CRITICAL">CRITICAL</option>
+          <option value="FATAL">FATAL</option>
+          <option value="ERROR">ERROR</option>
+          <option value="WARN">WARN</option>
+          <option value="INFO">INFO</option>
+          <option value="DEBUG">DEBUG</option>
+        </select>
+        <input type="datetime-local" id="startTime" class="input">
+        <input type="datetime-local" id="endTime" class="input">
+        <button class="btn btn-secondary" id="applyFilter">Apply</button>
+      </div>
+    </div>
+
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-item">
+        <span class="stat-label">Total:</span>
+        <span class="stat-value" id="totalLogs">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Sources:</span>
+        <span class="stat-value" id="totalSources">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Time Range:</span>
+        <span class="stat-value" id="timeRange">-</span>
+      </div>
+    </div>
+
+    <div class="timeline" id="timeline">
+      <div class="timeline-empty" id="emptyState">
+        <div class="empty-icon">📋</div>
+        <h2>No logs loaded</h2>
+        <p>Upload a log file or paste log data to get started</p>
+        <p class="empty-hint">Supported: JSON, Syslog, CSV, Plain Text, Windows Events</p>
+      </div>
+      <div class="timeline-list" id="logList"></div>
+    </div>
+
+    <div class="pagination" id="pagination">
+      <button class="btn btn-secondary" id="prevPage">← Previous</button>
+      <span id="pageInfo">Page 1</span>
+      <button class="btn btn-secondary" id="nextPage">Next →</button>
+    </div>
+  </div>
+
+  <div class="modal" id="uploadModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Upload Log File</h2>
+        <button class="close" id="closeUpload">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="drop-zone" id="dropZone">
+          <p>Drag & drop log file here</p>
+          <p class="drop-zone-hint">or click to select</p>
+          <input type="file" id="fileInput" accept=".log,.txt,.json,.csv,.xml" hidden>
+        </div>
+        <div class="file-info" id="fileInfo"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelUpload">Cancel</button>
+        <button class="btn btn-primary" id="importFile">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="pasteModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Paste Logs</h2>
+        <button class="close" id="closePaste">&times;</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="pasteArea" placeholder="Paste your logs here (JSON, Syslog, plain text, etc.)" class="textarea"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelPaste">Cancel</button>
+        <button class="btn btn-primary" id="importPaste">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="configModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Configuration</h2>
+        <button class="close" id="closeConfig">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>VirusTotal API Key</label>
+          <input type="password" id="vtApiKey" class="input" placeholder="Enter VT API key">
+          <p class="form-hint">Get your free API key at virustotal.com</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelConfig">Cancel</button>
+        <button class="btn btn-primary" id="saveConfig">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="logDetailModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Log Details</h2>
+        <button class="close" id="closeDetail">&times;</button>
+      </div>
+      <div class="modal-body" id="logDetailBody"></div>
+    </div>
+  </div>
+
+  <input type="file" id="hiddenFileInput" hidden>
+
+  <script src="app.js"></script>
+</body>
+</html>
