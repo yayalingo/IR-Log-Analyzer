@@ -126,6 +126,28 @@
           <input type="password" id="vtApiKey" class="input" placeholder="Enter VT API key">
           <p class="form-hint">Get your free API key at virustotal.com</p>
         </div>
+        <div class="form-group">
+          <label>Field Extraction</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="extractIp" checked>
+              <span>Extract IPs</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="extractHostname" checked>
+              <span>Extract Hostnames/Domains</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="extractUrl" checked>
+              <span>Extract URLs</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="extractHash" checked>
+              <span>Extract Hashes (MD5, SHA1, SHA256)</span>
+            </label>
+          </div>
+          <p class="form-hint">These settings apply to new log imports</p>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancelConfig">Cancel</button>

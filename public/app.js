@@ -29,6 +29,10 @@ const elements = {
   fileInfo: document.getElementById('fileInfo'),
   pasteArea: document.getElementById('pasteArea'),
   vtApiKey: document.getElementById('vtApiKey'),
+  extractIp: document.getElementById('extractIp'),
+  extractHostname: document.getElementById('extractHostname'),
+  extractUrl: document.getElementById('extractUrl'),
+  extractHash: document.getElementById('extractHash'),
 };
 
 const levelColors = {
@@ -110,14 +114,27 @@ function renderLogs(logs) {
   
   elements.emptyState.style.display = 'none';
   
-  elements.logList.innerHTML = logs.map(log => `
+  const extractTags = (val, type) => {
+    if (!val) return '';
+    return val.split(',').filter(v => v.trim()).map(v => `<span class="extract-tag ${type}">${escapeHtml(v.trim())}</span>`).join('');
+  };
+  
+  elements.logList.innerHTML = logs.map(log => {
+    const indicators = [];
+    if (log.ip) indicators.push(...log.ip.split(',').filter(i => i.trim()));
+    if (log.hostname) indicators.push(...log.hostname.split(',').filter(h => h.trim()));
+    if (log.url) indicators.push(...log.url.split(',').filter(u => u.trim()));
+    if (log.hash) indicators.push(...log.hash.split(',').filter(h => h.trim()));
+    
+    return `
     <div class="log-entry level-${log.level}" data-id="${log.id}">
       <span class="log-timestamp">${formatTimestamp(log.timestamp)}</span>
       <span class="log-level ${log.level}">${log.level}</span>
       <span class="log-source" title="${log.source}">${log.source}</span>
+      <span class="log-extract">${indicators.map(i => `<span class="extract-tag" title="${escapeHtml(i)}">${escapeHtml(i.length > 20 ? i.substring(0, 20) + '...' : i)}</span>`).join('')}</span>
       <span class="log-message" title="${escapeHtml(log.message)}">${escapeHtml(log.message)}</span>
     </div>
-  `).join('');
+  `}).join('');
   
   elements.logList.querySelectorAll('.log-entry').forEach(el => {
     el.addEventListener('click', () => showLogDetail(el.dataset.id));
@@ -344,6 +361,14 @@ document.getElementById('configBtn').addEventListener('click', async () => {
   const res = await fetch(`${API_BASE}/api/config/vt-key`);
   const data = await res.json();
   elements.vtApiKey.value = data.configured ? '********' : '';
+  
+  const extractRes = await fetch(`${API_BASE}/api/config/extraction`);
+  const extractData = await extractRes.json();
+  elements.extractIp.checked = extractData.ip !== false;
+  elements.extractHostname.checked = extractData.hostname !== false;
+  elements.extractUrl.checked = extractData.url !== false;
+  elements.extractHash.checked = extractData.hash !== false;
+  
   openModal(elements.configModal);
 });
 
@@ -407,19 +432,27 @@ document.getElementById('importPaste').addEventListener('click', () => {
 
 document.getElementById('saveConfig').addEventListener('click', async () => {
   const apiKey = elements.vtApiKey.value.trim();
-  if (!apiKey || apiKey === '********') {
-    closeModal(elements.configModal);
-    return;
+  if (apiKey && apiKey !== '********') {
+    await fetch(`${API_BASE}/api/config/vt-key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
   }
   
-  await fetch(`${API_BASE}/api/config/vt-key`, {
+  await fetch(`${API_BASE}/api/config/extraction`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey }),
+    body: JSON.stringify({
+      ip: elements.extractIp.checked,
+      hostname: elements.extractHostname.checked,
+      url: elements.extractUrl.checked,
+      hash: elements.extractHash.checked
+    }),
   });
   
   closeModal(elements.configModal);
-  alert('API key saved!');
+  alert('Settings saved!');
 });
 
 document.getElementById('applyFilter').addEventListener('click', () => loadLogs(1));

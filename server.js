@@ -30,9 +30,19 @@ async function initDb() {
       level TEXT,
       message TEXT,
       raw TEXT,
+      ip TEXT,
+      hostname TEXT,
+      url TEXT,
+      hash TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  
+  // Migration: add columns if they don't exist
+  try { db.run(`ALTER TABLE logs ADD COLUMN ip TEXT`); } catch(e) {}
+  try { db.run(`ALTER TABLE logs ADD COLUMN hostname TEXT`); } catch(e) {}
+  try { db.run(`ALTER TABLE logs ADD COLUMN url TEXT`); } catch(e) {}
+  try { db.run(`ALTER TABLE logs ADD COLUMN hash TEXT`); } catch(e) {}
   
   db.run(`
     CREATE TABLE IF NOT EXISTS enrichments (
@@ -110,7 +120,46 @@ const extractSource = (line, parsed) => {
   return 'unknown';
 };
 
-const parseLogLine = (line) => {
+const extractFields = (text, config) => {
+  const result = { ip: '', hostname: '', url: '', hash: '' };
+  
+  if (!config) config = getExtractConfig();
+  
+  if (config.ip) {
+    const ipPattern = /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g;
+    const ips = text.match(ipPattern) || [];
+    const uniqueIps = [...new Set(ips.filter(ip => !ip.startsWith('0') && !ip.startsWith('255.') && !ip.match(/^127\./)))];
+    result.ip = uniqueIps.join(',');
+  }
+  
+  if (config.hostname) {
+    const domainPattern = /\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|net|org|io|edu|gov|co|info|biz|ru|cn|xyz|top|tk|ml|ga|cf|gq|pw|cc|ws|su|onion)\b/gi;
+    const domains = text.match(domainPattern) || [];
+    const uniqueDomains = [...new Set(domains.filter(d => !d.includes('localhost') && d.length > 3))];
+    result.hostname = uniqueDomains.join(',');
+  }
+  
+  if (config.url) {
+    const urlPattern = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+    const urls = text.match(urlPattern) || [];
+    result.url = [...new Set(urls)].join(',');
+  }
+  
+  if (config.hash) {
+    const md5Pattern = /\b[a-fA-F0-9]{32}\b/g;
+    const sha1Pattern = /\b[a-fA-F0-9]{40}\b/g;
+    const sha256Pattern = /\b[a-fA-F0-9]{64}\b/g;
+    const md5s = text.match(md5Pattern) || [];
+    const sha1s = text.match(sha1Pattern) || [];
+    const sha256s = text.match(sha256Pattern) || [];
+    const hashes = [...new Set([...md5s, ...sha1s, ...sha256s])];
+    result.hash = hashes.join(',');
+  }
+  
+  return result;
+};
+
+const parseLogLine = (line, config) => {
   let parsed = null;
   let message = line.trim();
   
@@ -125,10 +174,12 @@ const parseLogLine = (line) => {
   const level = parsed?.level || parsed?.severity || parseLevel(line);
   const source = extractSource(line, parsed);
   
-  return { timestamp, level, source, message, raw: line };
+  const extracted = extractFields(line, config);
+  
+  return { timestamp, level, source, message, raw: line, ...extracted };
 };
 
-const parseJSONLog = (content) => {
+const parseJSONLog = (content, config) => {
   const logs = [];
   const lines = content.split('\n').filter(l => l.trim());
   
@@ -141,18 +192,19 @@ const parseJSONLog = (content) => {
         const level = parsed.level || parsed.severity || parseLevel(message);
         const source = parsed.source || parsed.hostname || parsed.host || 'unknown';
         
-        logs.push({ timestamp, level, source, message, raw: line });
+        const extracted = extractFields(line, config);
+        logs.push({ timestamp, level, source, message, raw: line, ...extracted });
       } catch (e) {
-        logs.push(parseLogLine(line));
+        logs.push(parseLogLine(line, config));
       }
     } else {
-      logs.push(parseLogLine(line));
+      logs.push(parseLogLine(line, config));
     }
   }
   return logs;
 };
 
-const parseSyslog = (content) => {
+const parseSyslog = (content, config) => {
   const logs = [];
   const lines = content.split('\n').filter(l => l.trim());
   
@@ -164,19 +216,20 @@ const parseSyslog = (content) => {
       const [, dateStr, host, process, , message] = match;
       const year = new Date().getFullYear();
       const timestamp = new Date(`${dateStr} ${year}`).toISOString();
-      logs.push({ timestamp, level: parseLevel(message), source: host, message, raw: line });
+      const extracted = extractFields(line, config);
+      logs.push({ timestamp, level: parseLevel(message), source: host, message, raw: line, ...extracted });
     } else {
-      logs.push(parseLogLine(line));
+      logs.push(parseLogLine(line, config));
     }
   }
   return logs;
 };
 
-const parseCSVLog = (content) => {
+const parseCSVLog = (content, config) => {
   const logs = [];
   const lines = content.split('\n').filter(l => l.trim());
   
-  if (lines.length < 2) return parsePlainText(content);
+  if (lines.length < 2) return parsePlainText(content, config);
   
   const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
   const timeIdx = headers.findIndex(h => h.includes('time') || h.includes('date'));
@@ -191,29 +244,31 @@ const parseCSVLog = (content) => {
     const level = lvlIdx >= 0 ? (cols[lvlIdx] || 'INFO') : parseLevel(message);
     const source = srcIdx >= 0 ? (cols[srcIdx] || 'unknown') : 'unknown';
     
-    logs.push({ timestamp, level, source, message, raw: lines[i] });
+    const extracted = extractFields(lines[i], config);
+    logs.push({ timestamp, level, source, message, raw: lines[i], ...extracted });
   }
   return logs;
 };
 
-const parsePlainText = (content) => {
-  return content.split('\n').filter(l => l.trim()).map(parseLogLine);
+const parsePlainText = (content, config) => {
+  return content.split('\n').filter(l => l.trim()).map(line => parseLogLine(line, config));
 };
 
 const parseLogs = (content, filename) => {
+  const config = getExtractConfig();
   const ext = path.extname(filename).toLowerCase();
   
   if (ext === '.json' || content.trim().startsWith('{')) {
-    return parseJSONLog(content);
+    return parseJSONLog(content, config);
   } else if (ext === '.csv' || content.includes(',') && content.split('\n')[0].split(',').length > 2) {
-    return parseCSVLog(content);
+    return parseCSVLog(content, config);
   } else if (ext === '.xml' || content.trim().startsWith('<')) {
-    return parseJSONLog(content.replace(/<[^>]+>/g, m => m.startsWith('<') && m.endsWith('>') ? '' : m));
+    return parseJSONLog(content.replace(/<[^>]+>/g, m => m.startsWith('<') && m.endsWith('>') ? '' : m), config);
   } else if (content.match(/^\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}/)) {
-    return parseSyslog(content);
+    return parseSyslog(content, config);
   }
   
-  return parsePlainText(content);
+  return parsePlainText(content, config);
 };
 
 const extractIndicators = (text) => {
@@ -273,12 +328,12 @@ app.post('/api/logs/import', upload.single('file'), (req, res) => {
     }
     
     const stmt = db.prepare(`
-      INSERT INTO logs (timestamp, source, level, message, raw)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO logs (timestamp, source, level, message, raw, ip, hostname, url, hash)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     for (const log of logs) {
-      stmt.run([log.timestamp, log.source, log.level, log.message, log.raw]);
+      stmt.run([log.timestamp, log.source, log.level, log.message, log.raw, log.ip || '', log.hostname || '', log.url || '', log.hash || '']);
     }
     stmt.free();
     
@@ -468,6 +523,33 @@ app.get('/api/config/vt-key', (req, res) => {
   res.json({ configured: hasKey });
 });
 
+const EXTRACT_CONFIG_PATH = path.join(__dirname, '.extract-config');
+
+function getExtractConfig() {
+  if (fs.existsSync(EXTRACT_CONFIG_PATH)) {
+    try {
+      return JSON.parse(fs.readFileSync(EXTRACT_CONFIG_PATH, 'utf8'));
+    } catch(e) {}
+  }
+  return { ip: true, hostname: true, url: true, hash: true };
+}
+
+app.get('/api/config/extraction', (req, res) => {
+  res.json(getExtractConfig());
+});
+
+app.post('/api/config/extraction', (req, res) => {
+  const { ip, hostname, url, hash } = req.body;
+  const config = {
+    ip: ip === true || ip === 'true',
+    hostname: hostname === true || hostname === 'true',
+    url: url === true || url === 'true',
+    hash: hash === true || hash === 'true'
+  };
+  fs.writeFileSync(EXTRACT_CONFIG_PATH, JSON.stringify(config, null, 2));
+  res.json({ success: true, config });
+});
+
 app.delete('/api/logs', (req, res) => {
   try {
     db.run('DELETE FROM logs');
@@ -483,7 +565,7 @@ app.get('/api/logs/export', (req, res) => {
   try {
     const { start, end, source, level, search } = req.query;
     
-    let query = 'SELECT timestamp, source, level, message, raw FROM logs WHERE 1=1';
+    let query = 'SELECT timestamp, source, level, message, raw, ip, hostname, url, hash FROM logs WHERE 1=1';
     const params = [];
     
     if (start) { query += ' AND timestamp >= ?'; params.push(start); }
@@ -502,7 +584,7 @@ app.get('/api/logs/export', (req, res) => {
     }
     stmt.free();
     
-    const headers = ['timestamp', 'source', 'level', 'message', 'raw'];
+    const headers = ['timestamp', 'source', 'level', 'message', 'ip', 'hostname', 'url', 'hash', 'raw'];
     const csvRows = [headers.join(',')];
     
     const escapeCsv = (str) => {
