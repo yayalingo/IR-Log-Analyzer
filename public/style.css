@@ -793,6 +793,8 @@ body {
 
 .tab-content {
   display: none;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .tab-content.active {
@@ -1110,6 +1112,8 @@ body {
   flex-direction: column;
   gap: 8px;
   margin-bottom: 16px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .note-item {
@@ -1131,6 +1135,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 250px;
+  overflow-y: auto;
 }
 
 .log-entry-small {

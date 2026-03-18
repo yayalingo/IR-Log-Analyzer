@@ -398,7 +398,24 @@ async function importLogs(content, filename) {
     const data = await res.json();
     
     if (data.success) {
-loadLogs(1);
+      loadLogs(1);
+      closeAllModals();
+      selectedFile = null;
+      elements.fileInfo.innerHTML = '';
+      
+      if (data.duplicates > 0) {
+        alert(`Imported ${data.count} new logs. Skipped ${data.duplicates} duplicate(s).`);
+      } else {
+        alert(`Imported ${data.count} logs.`);
+      }
+    } else {
+      alert('Import failed: ' + data.error);
+    }
+  } catch (err) {
+    console.error('Import error:', err);
+    alert('Import failed: ' + err.message);
+  }
+}
 
 async function checkAuth() {
   const stored = localStorage.getItem('ir_auth');
@@ -471,17 +488,6 @@ document.getElementById('loginPassword').addEventListener('keypress', (e) => {
 });
 
 checkAuth();
-      closeAllModals();
-      selectedFile = null;
-      elements.fileInfo.innerHTML = '';
-    } else {
-      alert('Import failed: ' + data.error);
-    }
-  } catch (err) {
-    console.error('Import error:', err);
-    alert('Import failed: ' + err.message);
-  }
-}
 
 function openModal(modal) {
   modal.classList.add('active');
@@ -831,13 +837,13 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
   const config = await res.json();
   
   document.getElementById('ollamaUrl').value = config.url || 'http://localhost:11434';
-  document.getElementById('ollamaModel').value = config.model || 'llama3';
+  document.getElementById('ollamaModel').value = config.model || 'llama3:latest';
   
   const casesRes = await authFetch(`${API_BASE}/api/cases`);
   const cases = await casesRes.json();
   
   const caseSelect = document.getElementById('analyzeCaseId');
-  caseSelect.innerHTML = '<option value="">-- All Logs (No Case) --</option>' + 
+  caseSelect.innerHTML = '<option value="">-- Select a Case --</option>' + 
     cases.map(c => `<option value="${c.id}">${escapeHtml(c.title)} (${c.severity}) - ${c.linked_logs_count || 0} logs</option>`).join('');
   
   document.getElementById('analysisStatus').innerHTML = '';
@@ -848,9 +854,13 @@ document.getElementById('closeAnalyze').addEventListener('click', () => closeMod
 document.getElementById('cancelAnalyze').addEventListener('click', () => closeModal(elements2.analyzeModal));
 
 document.getElementById('startAnalysis').addEventListener('click', async () => {
-  const scope = document.getElementById('analysisScope').value;
-  const customPrompt = document.getElementById('customPrompt').value.trim();
   const caseId = document.getElementById('analyzeCaseId').value;
+  const customPrompt = document.getElementById('customPrompt').value.trim();
+  
+  if (!caseId) {
+    alert('Please select a case to analyze');
+    return;
+  }
   
   const statusDiv = document.getElementById('analysisStatus');
   statusDiv.innerHTML = '<div class="loading-spinner">Analyzing with AI...</div>';
@@ -862,9 +872,8 @@ document.getElementById('startAnalysis').addEventListener('click', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        scope: { logLimit: scope === 'all' ? 10000 : parseInt(scope) },
-        customPrompt: customPrompt || null,
-        caseId: caseId || null
+        caseId: parseInt(caseId),
+        customPrompt: customPrompt || null
       }),
     });
     
@@ -889,6 +898,7 @@ async function showReport(id) {
     const res = await authFetch(`${API_BASE}/api/reports/${id}`);
     const report = await res.json();
     
+    closeModal(elements2.reportsListModal);
     elements2.reportContent.innerHTML = marked.parse(report.content);
     openModal(elements2.reportModal);
   } catch (err) {
@@ -954,7 +964,7 @@ document.getElementById('ollamaConfigBtn').addEventListener('click', async () =>
   const config = await res.json();
   
   document.getElementById('ollamaUrl').value = config.url || 'http://localhost:11434';
-  document.getElementById('ollamaModel').value = config.model || 'llama3';
+  document.getElementById('ollamaModel').value = config.model || 'llama3:latest';
   
   openModal(elements2.ollamaConfigModal);
 });
@@ -1412,4 +1422,4 @@ document.getElementById('confirmAddToCase').addEventListener('click', async () =
   }
 });
 
-loadLogs(1);
+checkAuth();

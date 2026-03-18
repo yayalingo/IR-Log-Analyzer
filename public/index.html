@@ -291,21 +291,11 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label>Analyze Specific Case</label>
+          <label>Select Case to Analyze</label>
           <select id="analyzeCaseId" class="input select">
-            <option value="">-- All Logs (No Case) --</option>
+            <option value="">-- Select a Case --</option>
           </select>
-          <p class="form-hint">Select a case to analyze only logs linked to that case</p>
-        </div>
-        <div class="form-group">
-          <label>Analysis Scope</label>
-          <select id="analysisScope" class="input select">
-            <option value="50">Last 50 logs</option>
-            <option value="100" selected>Last 100 logs</option>
-            <option value="200">Last 200 logs</option>
-            <option value="500">Last 500 logs</option>
-            <option value="all">All logs</option>
-          </select>
+          <p class="form-hint">Select a case to analyze all logs linked to that case</p>
         </div>
         <div class="form-group">
           <label>Custom Prompt (optional)</label>

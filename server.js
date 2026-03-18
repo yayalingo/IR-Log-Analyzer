@@ -10,11 +10,11 @@ const { marked } = require('marked');
 const cheerio = require('cheerio');
 
 const app = express();
-const PORT = 3000;
-const DB_PATH = path.join(__dirname, 'ir-logs.db');
+const PORT = process.env.PORT || 3000;
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'ir-logs.db');
 
-const AUTH_USER = 'sanya';
-const AUTH_PASS = 'sanya';
+const AUTH_USER = process.env.AUTH_USER || 'admin';
+const AUTH_PASS = process.env.AUTH_PASS || 'admin';
 
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = 60000;
@@ -225,7 +225,22 @@ async function initDb() {
   saveDb();
 }
 
+let saveTimeout = null;
 function saveDb() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    const data = db.export();
+    const buffer = Buffer.from(data);
+    fs.writeFileSync(DB_PATH, buffer);
+    saveTimeout = null;
+  }, 1000);
+}
+
+function saveDbSync() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+  }
   const data = db.export();
   const buffer = Buffer.from(data);
   fs.writeFileSync(DB_PATH, buffer);
@@ -297,7 +312,7 @@ const OLLAMA_CONFIG_PATH = path.join(__dirname, '.ollama-config');
 
 let ollamaConfig = {
   url: 'http://localhost:11434',
-  model: 'llama3'
+  model: 'llama3:latest'
 };
 
 function loadOllamaConfig() {
@@ -565,19 +580,31 @@ app.post('/api/logs/import', requireAuth, upload.single('file'), (req, res) => {
       });
     }
     
-    const stmt = db.prepare(`
-      INSERT INTO logs (timestamp, source, level, message, raw, ip, hostname, url, hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    
-    for (const log of logs) {
-      stmt.run([log.timestamp, log.source, log.level, log.message, log.raw, log.ip || '', log.hostname || '', log.url || '', log.hash || '']);
+    const checkStmt = db.prepare('SELECT raw FROM logs');
+    const existingRaws = new Set();
+    while (checkStmt.step()) {
+      existingRaws.add(checkStmt.getAsObject().raw);
     }
-    stmt.free();
+    checkStmt.free();
     
-    saveDb();
+    const uniqueLogs = logs.filter(log => !existingRaws.has(log.raw));
+    const duplicateCount = logs.length - uniqueLogs.length;
     
-    res.json({ success: true, count: logs.length, logs: logs.slice(0, 10) });
+    if (uniqueLogs.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO logs (timestamp, source, level, message, raw, ip, hostname, url, hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      for (const log of uniqueLogs) {
+        stmt.run([log.timestamp, log.source, log.level, log.message, log.raw, log.ip || '', log.hostname || '', log.url || '', log.hash || '']);
+      }
+      stmt.free();
+      
+      saveDb();
+    }
+    
+    res.json({ success: true, count: uniqueLogs.length, duplicates: duplicateCount, logs: uniqueLogs.slice(0, 10) });
   } catch (error) {
     console.error('Import error:', error);
     res.status(500).json({ error: error.message });
@@ -996,46 +1023,40 @@ app.delete('/api/threat-intel/:id', requireAuth, (req, res) => {
 app.post('/api/analyze', requireAuth, async (req, res) => {
   try {
     const config = loadOllamaConfig();
-    const { scope, customPrompt, caseId } = req.body;
+    const { customPrompt, caseId } = req.body;
     
-    let logs = [];
-    let logCount = 0;
-    let caseInfo = null;
-    
-    if (caseId) {
-      const caseStmt = db.prepare('SELECT * FROM cases WHERE id = ?');
-      caseStmt.bind([parseInt(caseId)]);
-      if (caseStmt.step()) {
-        caseInfo = caseStmt.getAsObject();
-      }
-      caseStmt.free();
-      
-      const logsStmt = db.prepare(`
-        SELECT l.* FROM logs l
-        JOIN case_logs cl ON l.id = cl.log_id
-        WHERE cl.case_id = ?
-        ORDER BY l.timestamp ASC
-      `);
-      logsStmt.bind([parseInt(caseId)]);
-      while (logsStmt.step()) {
-        logs.push(logsStmt.getAsObject());
-      }
-      logsStmt.free();
-      logCount = logs.length;
-    } else {
-      let logQuery = 'SELECT * FROM logs ORDER BY timestamp ASC';
-      const stmt = db.prepare(logQuery);
-      while (stmt.step()) {
-        logs.push(stmt.getAsObject());
-      }
-      stmt.free();
-      logCount = logs.length;
+    if (!caseId) {
+      return res.status(400).json({ error: 'Case ID is required' });
     }
     
-    const logLimit = scope?.logLimit || 100;
-    const sampleLogs = logs.slice(-logLimit);
+    const caseStmt = db.prepare('SELECT * FROM cases WHERE id = ?');
+    caseStmt.bind([parseInt(caseId)]);
+    if (!caseStmt.step()) {
+      caseStmt.free();
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    const caseInfo = caseStmt.getAsObject();
+    caseStmt.free();
     
-    const tiStmt = db.prepare('SELECT * FROM threat_intel ORDER BY created_at DESC');
+    const logsStmt = db.prepare(`
+      SELECT l.* FROM logs l
+      JOIN case_logs cl ON l.id = cl.log_id
+      WHERE cl.case_id = ?
+      ORDER BY l.timestamp ASC
+    `);
+    logsStmt.bind([parseInt(caseId)]);
+    const logs = [];
+    while (logsStmt.step()) {
+      logs.push(logsStmt.getAsObject());
+    }
+    logsStmt.free();
+    const logCount = logs.length;
+    
+    if (logCount === 0) {
+      return res.status(400).json({ error: 'No logs linked to this case. Please link some logs to the case first.' });
+    }
+    
+    const tiStmt = db.prepare('SELECT * FROM threat_intel ORDER BY created_at DESC LIMIT 20');
     const threatIntel = [];
     while (tiStmt.step()) {
       threatIntel.push(tiStmt.getAsObject());
@@ -1043,22 +1064,16 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
     tiStmt.free();
     
     const tiContext = threatIntel.length > 0 
-      ? `THREAT INTELLIGENCE REFERENCES:\n${threatIntel.map(t => `[${t.title}] ${t.content.substring(0, 2000)}`).join('\n\n')}`
-      : '';
+      ? `THREAT INTELLIGENCE REFERENCES:\n${threatIntel.map(t => `[${t.title}] ${t.content.substring(0, 1500)}`).join('\n\n')}`
+      : 'No threat intelligence loaded.';
     
-    const caseContext = caseInfo 
-      ? `CASE INFORMATION:\nTitle: ${caseInfo.title}\nSeverity: ${caseInfo.severity}\nStatus: ${caseInfo.status}\nDescription: ${caseInfo.description || 'N/A'}\n\n`
-      : '';
+    const caseContext = `CASE INFORMATION:\nTitle: ${caseInfo.title}\nSeverity: ${caseInfo.severity}\nStatus: ${caseInfo.status}\nDescription: ${caseInfo.description || 'N/A'}\n\n`;
     
-    const logsContext = caseId
-      ? `LOG DATA (${sampleLogs.length} of ${logCount} case-linked logs):\n${sampleLogs.map(l => 
-        `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
-      ).join('\n')}`
-      : `LOG DATA (last ${sampleLogs.length} of ${logCount} logs):\n${sampleLogs.map(l => 
-        `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
-      ).join('\n')}`;
+    const logsContext = `LOG DATA (${logCount} logs from case):\n${logs.map(l => 
+      `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
+    ).join('\n')}`;
     
-    const defaultPrompt = `You are a cybersecurity incident response analyst. Analyze the following logs and threat intelligence to produce a comprehensive investigation report.
+    const defaultPrompt = `You are a cybersecurity incident response analyst. Analyze the following case and logs to produce a comprehensive investigation report.
 
 ${caseContext}${tiContext}
 
@@ -1066,14 +1081,14 @@ ${logsContext}
 
 Based on your analysis, provide a detailed investigation report in markdown format with the following sections:
 1. **Executive Summary** - Brief overview of the incident
-2. **Timeline of Events** - Chronological sequence of suspicious activities
+2. **Timeline of Events** - Chronological sequence of suspicious activities  
 3. **Key Findings** - Important observations and patterns
 4. **Indicators of Compromise (IOCs)** - IPs, domains, hashes, URLs identified
 5. **Attack Vector Analysis** - How the attack likely occurred
 6. **Severity Assessment** - Impact and criticality
 7. **Recommendations** - Next steps for containment and remediation
 
-Focus on security-relevant events, errors, warnings, and suspicious patterns.`;
+Focus on security-relevant events, errors, warnings, and suspicious patterns. Highlight any connections between IOCs found in the logs.`;
     
     const prompt = customPrompt || defaultPrompt;
     
@@ -1090,9 +1105,7 @@ Focus on security-relevant events, errors, warnings, and suspicious patterns.`;
         INSERT INTO reports (title, content, logs_analyzed, threat_intel_count)
         VALUES (?, ?, ?, ?)
       `);
-      const reportTitle = caseInfo 
-        ? `Investigation Report - ${caseInfo.title} - ${new Date().toISOString().slice(0,10)}`
-        : `Investigation Report - ${new Date().toISOString().slice(0,10)}`;
+      const reportTitle = `Investigation Report - ${caseInfo.title} - ${new Date().toISOString().slice(0,10)}`;
       reportStmt.run([reportTitle, analysis, logCount, threatIntel.length]);
       reportStmt.free();
       
@@ -1100,10 +1113,10 @@ Focus on security-relevant events, errors, warnings, and suspicious patterns.`;
       
       const reportId = getLastInsertId();
       
-      res.json({ success: true, report: { id: reportId, title: reportTitle, content: analysis }, caseId: caseId ? parseInt(caseId) : null });
+      res.json({ success: true, report: { id: reportId, title: reportTitle, content: analysis }, caseId: parseInt(caseId) });
     } catch (ollamaError) {
       console.error('Ollama error:', ollamaError.message);
-      res.status(500).json({ error: `Ollama API error: ${ollamaError.message}` });
+      res.status(500).json({ error: `Ollama API error: ${ollamaError.message}. Make sure Ollama is running at ${config.url}` });
     }
   } catch (error) {
     console.error('Analysis error:', error);
