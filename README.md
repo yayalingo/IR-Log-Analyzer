@@ -5,8 +5,10 @@ Incident Response Log Analysis Tool with Timeline Visualization and Threat Intel
 ## Features
 
 - **Log Import**: Upload files (JSON, Syslog, CSV, plain text, XML) or paste logs directly
-- **Timeline View**: Chronological log display with color-coded severity levels
+- **Timeline View**: Chronological log display with color-coded severity levels, resizable columns
 - **Filtering**: Filter by time range, source, log level, and keyword search
+- **Field Extraction**: Configurable extraction of IPs, hostnames, URLs, and file hashes
+- **CSV Export**: Export filtered logs to CSV format
 - **Threat Intelligence**: Extract and enrich IPs, domains, URLs, and file hashes with VirusTotal
 - **Dark Mode**: Full dark theme UI for comfortable viewing
 - **MCP Server**: Connect via Model Context Protocol for AI integration
