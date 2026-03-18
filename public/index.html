@@ -14,6 +14,7 @@
         <span class="badge" id="logCount">0 logs</span>
       </div>
       <div class="header-right">
+        <button class="btn btn-secondary" id="integrationsBtn">🔗 Integrations</button>
         <button class="btn btn-secondary" id="ollamaConfigBtn">🤖 Ollama</button>
         <button class="btn btn-secondary" id="configBtn">⚙️ Config</button>
         <button class="btn btn-danger" id="clearBtn">Clear All</button>
@@ -28,7 +29,10 @@
         <button class="btn btn-accent" id="threatIntelBtn">🛡️ Threat Intel</button>
         <button class="btn btn-accent" id="analyzeBtn">🤖 AI Analyze</button>
         <button class="btn btn-secondary" id="reportsBtn">📊 Reports</button>
+        <button class="btn btn-secondary" id="casesBtn">📁 Cases</button>
+        <button class="btn btn-secondary" id="iocMatchesBtn">🎯 IOC Matches</button>
         <button class="btn btn-secondary" id="chefBtn">🔪 CyberChef</button>
+        <button class="btn btn-primary" id="dashboardBtn">📈 Dashboard</button>
       </div>
       <div class="toolbar-filters">
         <input type="text" id="searchInput" placeholder="Search logs..." class="input">
@@ -325,7 +329,206 @@
     </div>
   </div>
 
+  <div class="modal" id="dashboardModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Security Dashboard</h2>
+        <button class="close" id="closeDashboard">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="dashboard-grid">
+          <div class="dash-card">
+            <div class="dash-value" id="dashTotalLogs">0</div>
+            <div class="dash-label">Total Logs</div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-value" id="dashOpenCases">0</div>
+            <div class="dash-label">Open Cases</div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-value" id="dashIocMatches">0</div>
+            <div class="dash-label">IOC Matches</div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-value" id="dashThreatIntel">0</div>
+            <div class="dash-label">Threat Intel</div>
+          </div>
+        </div>
+        <div class="dash-charts">
+          <div class="dash-chart">
+            <h3>Log Levels</h3>
+            <div class="level-bars" id="levelBars"></div>
+          </div>
+          <div class="dash-chart">
+            <h3>Top Sources</h3>
+            <div class="source-list" id="sourceList"></div>
+          </div>
+        </div>
+        <div class="dash-chart">
+          <h3>Log Trend (Last 7 Days)</h3>
+          <div class="trend-chart" id="trendChart"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeDashboardBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="casesModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Incident Cases</h2>
+        <button class="close" id="closeCases">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="case-actions">
+          <button class="btn btn-primary" id="newCaseBtn">+ New Case</button>
+        </div>
+        <div class="tabs">
+          <button class="tab active" data-tab="cases-list">All Cases</button>
+          <button class="tab" data-tab="case-detail">Case Details</button>
+        </div>
+        <div class="tab-content active" id="cases-list">
+          <div id="casesList" class="item-list"></div>
+        </div>
+        <div class="tab-content" id="case-detail">
+          <div id="caseDetail"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeCasesBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="newCaseModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Create New Case</h2>
+        <button class="close" id="closeNewCase">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Case Title</label>
+          <input type="text" id="caseTitle" class="input" placeholder="Incident title">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="caseDescription" class="textarea" rows="3" placeholder="Brief description"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Severity</label>
+          <select id="caseSeverity" class="input select">
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium" selected>Medium</option>
+            <option value="Low">Low</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelNewCase">Cancel</button>
+        <button class="btn btn-primary" id="createCaseBtn">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="iocMatchesModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>IOC Matches</h2>
+        <button class="close" id="closeIocMatches">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="ioc-list" id="iocList"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeIocMatchesBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="integrationsModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Integrations</h2>
+        <button class="close" id="closeIntegrations">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs">
+          <button class="tab active" data-tab="int-webhooks">Webhooks</button>
+          <button class="tab" data-tab="int-forwarding">Log Forwarding</button>
+          <button class="tab" data-tab="int-misp">MISP</button>
+          <button class="tab" data-tab="int-stix">STIX Import</button>
+        </div>
+        <div class="tab-content active" id="int-webhooks">
+          <h3>Webhook Alerts</h3>
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="webhookName" class="input" placeholder="Slack Alert">
+          </div>
+          <div class="form-group">
+            <label>URL</label>
+            <input type="url" id="webhookUrl" class="input" placeholder="https://hooks.slack.com/...">
+          </div>
+          <div class="form-group">
+            <label>Events</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label"><input type="checkbox" id="webhookCritical" value="critical"> <span>Critical Logs</span></label>
+              <label class="checkbox-label"><input type="checkbox" id="webhookIoc" value="ioc_match"> <span>IOC Matches</span></label>
+              <label class="checkbox-label"><input type="checkbox" id="webhookCase" value="case_created"> <span>New Cases</span></label>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="addWebhookBtn">Add Webhook</button>
+          <div id="webhookList" class="item-list" style="margin-top: 16px;"></div>
+        </div>
+        <div class="tab-content" id="int-forwarding">
+          <h3>Log Forwarding</h3>
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="forwardName" class="input" placeholder="ElasticSearch">
+          </div>
+          <div class="form-group">
+            <label>Type</label>
+            <select id="forwardType" class="input select">
+              <option value="http">HTTP</option>
+              <option value="syslog">Syslog</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Config (JSON)</label>
+            <textarea id="forwardConfig" class="textarea" rows="3" placeholder='{"url": "http://elasticsearch:9200/_bulk"}'></textarea>
+          </div>
+          <button class="btn btn-primary" id="addForwardingBtn">Add Forwarding</button>
+          <div id="forwardingList" class="item-list" style="margin-top: 16px;"></div>
+        </div>
+        <div class="tab-content" id="int-misp">
+          <h3>MISP Integration</h3>
+          <div class="form-group">
+            <label>MISP URL</label>
+            <input type="url" id="mispUrl" class="input" placeholder="https://misp.example.com">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="mispApiKey" class="input" placeholder="MISP API key">
+          </div>
+          <button class="btn btn-primary" id="importMispBtn">Import Events</button>
+        </div>
+        <div class="tab-content" id="int-stix">
+          <h3>STIX Import</h3>
+          <div class="form-group">
+            <label>STIX Bundle (JSON)</label>
+            <textarea id="stixBundle" class="textarea" rows="10" placeholder='{"type": "bundle", "objects": [...]}'></textarea>
+          </div>
+          <button class="btn btn-primary" id="importStixBtn">Import STIX</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeIntegrationsBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="app.js"></script>
-</body>
-</html>

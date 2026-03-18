@@ -894,6 +894,273 @@ body {
   margin-left: 0;
   color: var(--text-secondary);
 }
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.dash-card {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+
+.dash-value {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dash-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.dash-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.dash-chart {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--border);
+}
+
+.dash-chart h3 {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+.level-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.level-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.level-bar-label {
+  width: 70px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.level-bar-track {
+  flex: 1;
+  height: 16px;
+  background: var(--bg-primary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.level-bar-fill {
+  height: 100%;
+  transition: width 0.3s;
+}
+
+.level-bar-value {
+  width: 40px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.source-item span:first-child {
+  color: var(--accent);
+}
+
+.source-item span:last-child {
+  color: var(--text-secondary);
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 120px;
+  padding-top: 20px;
+}
+
+.trend-bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+.trend-bar-fill {
+  width: 100%;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  transition: height 0.3s;
+}
+
+.trend-bar-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.case-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.case-header {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.case-header h3 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.case-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.severity-badge, .status-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.note-item {
+  background: var(--bg-tertiary);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.note-item p {
+  margin-bottom: 4px;
+}
+
+.note-item small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.linked-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-entry-small {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.ioc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ioc-match-item {
+  display: grid;
+  grid-template-columns: 60px 150px 1fr 140px;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  align-items: center;
+  font-size: 12px;
+}
+
+.ioc-type {
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.ioc-value {
+  font-family: 'SF Mono', Monaco, monospace;
+  color: var(--warning);
+}
+
+.ioc-log {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ioc-time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.integrations-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.integrations-section {
+  background: var(--bg-tertiary);
+  padding: 16px;
+  border-radius: var(--radius);
+}
+
+.integrations-section h3 {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--accent);
+}
   .toolbar {
     flex-direction: column;
     align-items: stretch;

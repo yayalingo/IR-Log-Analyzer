@@ -827,4 +827,362 @@ document.getElementById('saveOllamaConfig').addEventListener('click', async () =
   alert('Ollama configuration saved!');
 });
 
+const elements3 = {
+  dashboardModal: document.getElementById('dashboardModal'),
+  casesModal: document.getElementById('casesModal'),
+  newCaseModal: document.getElementById('newCaseModal'),
+  iocMatchesModal: document.getElementById('iocMatchesModal'),
+  integrationsModal: document.getElementById('integrationsModal'),
+};
+
+document.getElementById('dashboardBtn').addEventListener('click', async () => {
+  const res = await fetch(`${API_BASE}/api/dashboard`);
+  const data = await res.json();
+  
+  document.getElementById('dashTotalLogs').textContent = data.totalLogs || 0;
+  document.getElementById('dashOpenCases').textContent = data.openCases || 0;
+  document.getElementById('dashIocMatches').textContent = data.iocMatches || 0;
+  document.getElementById('dashThreatIntel').textContent = data.threatIntelCount || 0;
+  
+  const levelCounts = data.levelCounts || {};
+  const levelColors = { CRITICAL: '#ff7b72', FATAL: '#ff7b72', ERROR: '#f85149', WARN: '#d29922', WARNING: '#d29922', INFO: '#58a6ff', DEBUG: '#8b949e' };
+  let levelHtml = '';
+  const totalLevel = Object.values(levelCounts).reduce((a, b) => a + b, 0) || 1;
+  for (const [level, count] of Object.entries(levelCounts)) {
+    const pct = Math.round((count / totalLevel) * 100);
+    levelHtml += `<div class="level-bar"><span class="level-bar-label">${level}</span><div class="level-bar-track"><div class="level-bar-fill" style="width: ${pct}%; background: ${levelColors[level] || '#8b949e'}"></div></div><span class="level-bar-value">${count}</span></div>`;
+  }
+  document.getElementById('levelBars').innerHTML = levelHtml || '<p style="color: var(--text-muted)">No data</p>';
+  
+  const sourceList = data.topSources || [];
+  document.getElementById('sourceList').innerHTML = sourceList.map(s => `<div class="source-item"><span>${escapeHtml(s.source)}</span><span>${s.count}</span></div>`).join('') || '<p style="color: var(--text-muted)">No data</p>';
+  
+  const trendHtml = (data.recentTrend || []).map(d => `<div class="trend-bar"><div class="trend-bar-fill" style="height: ${Math.min(100, (d.count / 100))}%"></div><span class="trend-bar-label">${d.date?.slice(5) || ''}</span></div>`).join('');
+  document.getElementById('trendChart').innerHTML = trendHtml || '<p style="color: var(--text-muted)">No data</p>';
+  
+  openModal(elements3.dashboardModal);
+});
+
+document.getElementById('closeDashboard').addEventListener('click', () => closeModal(elements3.dashboardModal));
+document.getElementById('closeDashboardBtn').addEventListener('click', () => closeModal(elements3.dashboardModal));
+
+document.getElementById('casesBtn').addEventListener('click', async () => {
+  await loadCasesList();
+  openModal(elements3.casesModal);
+});
+
+document.getElementById('closeCases').addEventListener('click', () => closeModal(elements3.casesModal));
+document.getElementById('closeCasesBtn').addEventListener('click', () => closeModal(elements3.casesModal));
+
+document.getElementById('newCaseBtn').addEventListener('click', () => openModal(elements3.newCaseModal));
+document.getElementById('closeNewCase').addEventListener('click', () => closeModal(elements3.newCaseModal));
+document.getElementById('cancelNewCase').addEventListener('click', () => closeModal(elements3.newCaseModal));
+
+document.getElementById('createCaseBtn').addEventListener('click', async () => {
+  const title = document.getElementById('caseTitle').value.trim();
+  const description = document.getElementById('caseDescription').value.trim();
+  const severity = document.getElementById('caseSeverity').value;
+  
+  if (!title) {
+    alert('Please enter a case title');
+    return;
+  }
+  
+  const res = await fetch(`${API_BASE}/api/cases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, description, severity }),
+  });
+  
+  const data = await res.json();
+  if (data.success) {
+    closeModal(elements3.newCaseModal);
+    document.getElementById('caseTitle').value = '';
+    document.getElementById('caseDescription').value = '';
+    await loadCasesList();
+  } else {
+    alert('Error: ' + data.error);
+  }
+});
+
+async function loadCasesList() {
+  const res = await fetch(`${API_BASE}/api/cases`);
+  const cases = await res.json();
+  
+  const severityColors = { Critical: '#ff7b72', High: '#f85149', Medium: '#d29922', Low: '#58a6ff' };
+  const statusColors = { Open: '#3fb950', Closed: '#8b949e', InProgress: '#d29922' };
+  
+  document.getElementById('casesList').innerHTML = cases.length ? cases.map(c => `
+    <div class="item-row">
+      <div class="item-info">
+        <strong>${escapeHtml(c.title)}</strong>
+        <span class="item-meta">
+          <span class="severity-badge" style="background: ${severityColors[c.severity] || '#8b949e'}">${c.severity}</span>
+          <span class="status-badge" style="background: ${statusColors[c.status] || '#8b949e'}">${c.status}</span>
+          ${new Date(c.created_at).toLocaleString()}
+        </span>
+      </div>
+      <div class="item-actions">
+        <button class="btn btn-primary btn-sm" onclick="viewCase(${c.id})">View</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCase(${c.id})">Delete</button>
+      </div>
+    </div>
+  `).join('') : '<p style="color: var(--text-muted)">No cases created yet</p>';
+}
+
+async function viewCase(id) {
+  const res = await fetch(`${API_BASE}/api/cases/${id}`);
+  const c = await res.json();
+  
+  document.querySelector('.tab[data-tab="case-detail"]').click();
+  
+  document.getElementById('caseDetail').innerHTML = `
+    <div class="case-header">
+      <h3>${escapeHtml(c.title)}</h3>
+      <div class="case-meta">
+        <span class="severity-badge" style="background: ${{Critical:'#ff7b72',High:'#f85149',Medium:'#d29922',Low:'#58a6ff'}[c.severity]||'#8b949e'}">${c.severity}</span>
+        <span class="status-badge" style="background: ${{Open:'#3fb950',Closed:'#8b949e',InProgress:'#d29922'}[c.status]||'#8b949e'}">${c.status}</span>
+        <span>Created: ${new Date(c.created_at).toLocaleString()}</span>
+      </div>
+    </div>
+    <p>${escapeHtml(c.description || 'No description')}</p>
+    
+    <h4>Notes</h4>
+    <div class="notes-list">
+      ${(c.notes || []).map(n => `<div class="note-item"><p>${escapeHtml(n.content)}</p><small>${new Date(n.created_at).toLocaleString()}</small></div>`).join('') || '<p style="color: var(--text-muted)">No notes</p>'}
+    </div>
+    <div class="form-group" style="margin-top: 12px;">
+      <textarea id="newNote" class="textarea" rows="2" placeholder="Add a note..."></textarea>
+      <button class="btn btn-primary btn-sm" onclick="addNote(${c.id})" style="margin-top: 8px;">Add Note</button>
+    </div>
+    
+    <h4>Linked Logs (${(c.linkedLogs || []).length})</h4>
+    <div class="linked-logs">
+      ${(c.linkedLogs || []).map(l => `<div class="log-entry-small"><span class="log-level ${l.level}">${l.level}</span> <span>${escapeHtml(l.message?.substring(0, 80) || '')}</span></div>`).join('') || '<p style="color: var(--text-muted)">No logs linked</p>'}
+    </div>
+    
+    <div class="case-actions" style="margin-top: 16px;">
+      <select id="updateStatus" class="input select" style="width: auto;">
+        <option value="Open">Open</option>
+        <option value="InProgress">In Progress</option>
+        <option value="Closed">Closed</option>
+      </select>
+      <button class="btn btn-secondary" onclick="updateCaseStatus(${c.id})">Update Status</button>
+    </div>
+  `;
+}
+
+async function addNote(caseId) {
+  const content = document.getElementById('newNote').value.trim();
+  if (!content) return;
+  
+  await fetch(`${API_BASE}/api/cases/${caseId}/notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  });
+  
+  document.getElementById('newNote').value = '';
+  await viewCase(caseId);
+}
+
+async function updateCaseStatus(caseId) {
+  const status = document.getElementById('updateStatus').value;
+  await fetch(`${API_BASE}/api/cases/${caseId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  await loadCasesList();
+  await viewCase(caseId);
+}
+
+async function deleteCase(id) {
+  if (!confirm('Delete this case?')) return;
+  await fetch(`${API_BASE}/api/cases/${id}`, { method: 'DELETE' });
+  await loadCasesList();
+}
+
+document.getElementById('iocMatchesBtn').addEventListener('click', async () => {
+  const res = await fetch(`${API_BASE}/api/ioc/matches`);
+  const matches = await res.json();
+  
+  document.getElementById('iocList').innerHTML = matches.length ? matches.map(m => `
+    <div class="ioc-match-item">
+      <span class="ioc-type">${escapeHtml(m.indicator_type)}</span>
+      <span class="ioc-value">${escapeHtml(m.indicator)}</span>
+      <span class="ioc-log">${escapeHtml(m.message?.substring(0, 60) || '')}</span>
+      <span class="ioc-time">${new Date(m.matched_at).toLocaleString()}</span>
+    </div>
+  `).join('') : '<p style="color: var(--text-muted)">No IOC matches found</p>';
+  
+  openModal(elements3.iocMatchesModal);
+});
+
+document.getElementById('closeIocMatches').addEventListener('click', () => closeModal(elements3.iocMatchesModal));
+document.getElementById('closeIocMatchesBtn').addEventListener('click', () => closeModal(elements3.iocMatchesModal));
+
+document.getElementById('integrationsBtn').addEventListener('click', async () => {
+  await loadWebhooks();
+  await loadForwarding();
+  openModal(elements3.integrationsModal);
+});
+
+document.getElementById('closeIntegrations').addEventListener('click', () => closeModal(elements3.integrationsModal));
+document.getElementById('closeIntegrationsBtn').addEventListener('click', () => closeModal(elements3.integrationsModal));
+
+async function loadWebhooks() {
+  const res = await fetch(`${API_BASE}/api/config/webhooks`);
+  const webhooks = await res.json();
+  
+  document.getElementById('webhookList').innerHTML = webhooks.length ? webhooks.map(w => `
+    <div class="item-row">
+      <div class="item-info">
+        <strong>${escapeHtml(w.name)}</strong>
+        <span class="item-meta">${escapeHtml(w.url)}</span>
+      </div>
+      <div class="item-actions">
+        <button class="btn btn-secondary btn-sm" onclick="testWebhook(${w.id})">Test</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteWebhook(${w.id})">Delete</button>
+      </div>
+    </div>
+  `).join('') : '<p style="color: var(--text-muted)">No webhooks configured</p>';
+}
+
+document.getElementById('addWebhookBtn').addEventListener('click', async () => {
+  const name = document.getElementById('webhookName').value.trim();
+  const url = document.getElementById('webhookUrl').value.trim();
+  const events = [];
+  if (document.getElementById('webhookCritical').checked) events.push('critical');
+  if (document.getElementById('webhookIoc').checked) events.push('ioc_match');
+  if (document.getElementById('webhookCase').checked) events.push('case_created');
+  
+  if (!name || !url || events.length === 0) {
+    alert('Please fill in all fields');
+    return;
+  }
+  
+  await fetch(`${API_BASE}/api/config/webhooks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, url, events }),
+  });
+  
+  document.getElementById('webhookName').value = '';
+  document.getElementById('webhookUrl').value = '';
+  await loadWebhooks();
+});
+
+async function testWebhook(id) {
+  const res = await fetch(`${API_BASE}/api/config/webhooks/${id}/test`, { method: 'POST' });
+  const data = await res.json();
+  alert(data.success ? 'Test successful!' : 'Test failed: ' + data.error);
+}
+
+async function deleteWebhook(id) {
+  if (!confirm('Delete this webhook?')) return;
+  await fetch(`${API_BASE}/api/config/webhooks/${id}`, { method: 'DELETE' });
+  await loadWebhooks();
+}
+
+async function loadForwarding() {
+  const res = await fetch(`${API_BASE}/api/config/forwarding`);
+  const configs = await res.json();
+  
+  document.getElementById('forwardingList').innerHTML = configs.length ? configs.map(f => `
+    <div class="item-row">
+      <div class="item-info">
+        <strong>${escapeHtml(f.name)}</strong>
+        <span class="item-meta">${f.type}</span>
+      </div>
+      <div class="item-actions">
+        <button class="btn btn-danger btn-sm" onclick="deleteForwarding(${f.id})">Delete</button>
+      </div>
+    </div>
+  `).join('') : '<p style="color: var(--text-muted)">No forwarding configured</p>';
+}
+
+document.getElementById('addForwardingBtn').addEventListener('click', async () => {
+  const name = document.getElementById('forwardName').value.trim();
+  const type = document.getElementById('forwardType').value;
+  const configStr = document.getElementById('forwardConfig').value.trim();
+  
+  if (!name || !configStr) {
+    alert('Please fill in all fields');
+    return;
+  }
+  
+  try {
+    const config = JSON.parse(configStr);
+    await fetch(`${API_BASE}/api/config/forwarding`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type, config }),
+    });
+    
+    document.getElementById('forwardName').value = '';
+    document.getElementById('forwardConfig').value = '';
+    await loadForwarding();
+  } catch (e) {
+    alert('Invalid JSON config');
+  }
+});
+
+async function deleteForwarding(id) {
+  if (!confirm('Delete this forwarding config?')) return;
+  await fetch(`${API_BASE}/api/config/forwarding/${id}`, { method: 'DELETE' });
+  await loadForwarding();
+}
+
+document.getElementById('importMispBtn').addEventListener('click', async () => {
+  const url = document.getElementById('mispUrl').value.trim();
+  const apiKey = document.getElementById('mispApiKey').value.trim();
+  
+  if (!url || !apiKey) {
+    alert('Please enter MISP URL and API key');
+    return;
+  }
+  
+  const btn = document.getElementById('importMispBtn');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/threat-intel/misp/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, apiKey }),
+    });
+    const data = await res.json();
+    alert(data.success ? `Imported ${data.imported} events` : 'Error: ' + data.error);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+  
+  btn.disabled = false;
+  btn.textContent = 'Import Events';
+});
+
+document.getElementById('importStixBtn').addEventListener('click', async () => {
+  const bundleStr = document.getElementById('stixBundle').value.trim();
+  
+  if (!bundleStr) {
+    alert('Please enter STIX bundle');
+    return;
+  }
+  
+  try {
+    const bundle = JSON.parse(bundleStr);
+    const res = await fetch(`${API_BASE}/api/threat-intel/stix/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bundle }),
+    });
+    const data = await res.json();
+    alert(data.success ? `Imported ${data.imported} objects` : 'Error: ' + data.error);
+  } catch (e) {
+    alert('Invalid JSON');
+  }
+});
+
 loadLogs(1);

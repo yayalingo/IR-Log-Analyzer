@@ -87,6 +87,78 @@ async function initDb() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_threat_intel_created ON threat_intel(created_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at)`);
   
+  db.run(`
+    CREATE TABLE IF NOT EXISTS cases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      description TEXT,
+      severity TEXT DEFAULT 'Medium',
+      status TEXT DEFAULT 'Open',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  
+  db.run(`
+    CREATE TABLE IF NOT EXISTS case_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER,
+      content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (case_id) REFERENCES cases(id)
+    )
+  `);
+  
+  db.run(`
+    CREATE TABLE IF NOT EXISTS case_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_id INTEGER,
+      log_id INTEGER,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (case_id) REFERENCES cases(id),
+      FOREIGN KEY (log_id) REFERENCES logs(id)
+    )
+  `);
+  
+  db.run(`
+    CREATE TABLE IF NOT EXISTS ioc_matches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      log_id INTEGER,
+      indicator TEXT,
+      indicator_type TEXT,
+      threat_intel_id INTEGER,
+      matched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (log_id) REFERENCES logs(id),
+      FOREIGN KEY (threat_intel_id) REFERENCES threat_intel(id)
+    )
+  `);
+  
+  db.run(`
+    CREATE TABLE IF NOT EXISTS webhook_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      url TEXT,
+      events TEXT,
+      enabled INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  
+  db.run(`
+    CREATE TABLE IF NOT EXISTS forwarding_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      type TEXT,
+      config TEXT,
+      enabled INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  
+  db.run(`CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_case_notes_case ON case_notes(case_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_ioc_matches_log ON ioc_matches(log_id)`);
+  
   saveDb();
 }
 
@@ -926,6 +998,681 @@ app.delete('/api/reports/:id', (req, res) => {
 
 app.get('/api/chef', (req, res) => {
   res.redirect('https://gchq.github.io/Chef炒/');
+});
+
+const MITRE_TECHNIQUES = {
+  'T1078': { name: 'Valid Accounts', severity: 'High' },
+  'T1078.003': { name: 'Valid Accounts: Cloud Accounts', severity: 'High' },
+  'T1082': { name: 'System Information Discovery', severity: 'Medium' },
+  'T1083': { name: 'File and Directory Discovery', severity: 'Medium' },
+  'T1087': { name: 'Account Discovery', severity: 'Medium' },
+  'T1105': { name: 'Ingress Tool Transfer', severity: 'High' },
+  'T1110': { name: 'Brute Force', severity: 'High' },
+  'T1112': { name: 'Modify Registry', severity: 'High' },
+  'T1113': { name: 'Screen Capture', severity: 'Medium' },
+  'T1486': { name: 'Data Encrypted for Impact', severity: 'Critical' },
+  'T1490': { name: 'Inhibit System Recovery', severity: 'High' },
+  'T1059': { name: 'Command and Scripting Interpreter', severity: 'High' },
+  'T1059.004': { name: 'Command and Scripting Interpreter: Unix Shell', severity: 'High' },
+  'T1059.007': { name: 'Command and Scripting Interpreter: JavaScript', severity: 'High' },
+  'T1021': { name: 'Remote Services', severity: 'High' },
+  'T1021.001': { name: 'Remote Services: Remote Desktop Protocol', severity: 'High' },
+  'T1021.004': { name: 'Remote Services: SSH', severity: 'High' },
+  'T1003': { name: 'OS Credential Dumping', severity: 'Critical' },
+  'T1005': { name: 'Data from Local System', severity: 'High' },
+  'T1041': { name: 'Exfiltration Over C2 Channel', severity: 'Critical' },
+  'T1047': { name: 'Windows Management Instrumentation', severity: 'High' },
+  'T1053': { name: 'Scheduled Task/Job', severity: 'High' },
+  'T1055': { name: 'Process Injection', severity: 'High' },
+  'T1068': { name: 'Exploitation for Privilege Escalation', severity: 'Critical' },
+  'T1190': { name: 'Exploit Public-Facing Application', severity: 'Critical' },
+  'T1200': { name: 'Adversary in the Middle', severity: 'High' },
+  'T1203': { name: 'Exploitation for Client Execution', severity: 'High' },
+  'T1210': { name: 'Exploitation of Remote Services', severity: 'Critical' },
+  'T1547': { name: 'Boot or Logon Autostart Execution', severity: 'High' },
+  'T1569': { name: 'System Services', severity: 'High' },
+  'T1573': { name: 'Encrypted Channel', severity: 'High' },
+  'T1588': { name: 'Obtain Capabilities', severity: 'Medium' },
+  'T1595': { name: 'Active Scanning', severity: 'Medium' },
+  'T1592': { name: 'Gather Victim Host Information', severity: 'Low' },
+};
+
+function calculateSeverity(level, indicators) {
+  let score = 0;
+  const levelScores = { CRITICAL: 10, FATAL: 10, ERROR: 7, WARN: 4, WARNING: 4, INFO: 1, DEBUG: 0, TRACE: 0 };
+  score += levelScores[level] || 0;
+  
+  if (indicators?.ip) score += 3;
+  if (indicators?.hash) score += 5;
+  if (indicators?.url) score += 4;
+  if (indicators?.hostname?.includes('.onion')) score += 8;
+  
+  if (score >= 10) return 'Critical';
+  if (score >= 7) return 'High';
+  if (score >= 4) return 'Medium';
+  if (score >= 1) return 'Low';
+  return 'Info';
+}
+
+function mapToMitre(log) {
+  const techniques = [];
+  const message = (log.message || '').toLowerCase();
+  const raw = (log.raw || '').toLowerCase();
+  const combined = message + ' ' + raw;
+  
+  if (combined.includes('ssh') && (combined.includes('failed') || combined.includes('authentication'))) {
+    techniques.push({ id: 'T1110', ...MITRE_TECHNIQUES['T1110'] });
+  }
+  if (combined.includes('cmd.exe') || combined.includes('powershell') || combined.includes('bash') || combined.includes('sh -')) {
+    techniques.push({ id: 'T1059', ...MITRE_TECHNIQUES['T1059'] });
+  }
+  if (combined.includes('registry') && (combined.includes('modify') || combined.includes('set') || combined.includes('add'))) {
+    techniques.push({ id: 'T1112', ...MITRE_TECHNIQUES['T1112'] });
+  }
+  if (combined.includes('wmic') || combined.includes('winrm')) {
+    techniques.push({ id: 'T1047', ...MITRE_TECHNIQUES['T1047'] });
+  }
+  if (combined.includes('scheduled task') || combined.includes('cron') || combined.includes('at job')) {
+    techniques.push({ id: 'T1053', ...MITRE_TECHNIQUES['T1053'] });
+  }
+  if (combined.includes('lsass') || combined.includes('mimikatz') || combined.includes('credential')) {
+    techniques.push({ id: 'T1003', ...MITRE_TECHNIQUES['T1003'] });
+  }
+  if (combined.includes('meterpreter') || combined.includes('reverse shell') || combined.includes('backdoor')) {
+    techniques.push({ id: 'T1105', ...MITRE_TECHNIQUES['T1105'] });
+  }
+  if (combined.includes('rdp') || combined.includes('remote desktop')) {
+    techniques.push({ id: 'T1021.001', ...MITRE_TECHNIQUES['T1021.001'] });
+  }
+  if (combined.includes('whoami') || combined.includes('hostname') || combined.includes('uname')) {
+    techniques.push({ id: 'T1082', ...MITRE_TECHNIQUES['T1082'] });
+  }
+  if (combined.includes('.onion') || combined.includes('tor')) {
+    techniques.push({ id: 'T1573', ...MITRE_TECHNIQUES['T1573'] });
+  }
+  if (combined.includes('exploit') || combined.includes('cve-')) {
+    techniques.push({ id: 'T1190', ...MITRE_TECHNIQUES['T1190'] });
+  }
+  
+  return techniques;
+}
+
+async function checkIocMatches(log) {
+  const matches = [];
+  const indicators = extractIndicators(log.raw || log.message || '');
+  
+  const tiStmt = db.prepare('SELECT * FROM threat_intel WHERE content LIKE ?');
+  tiStmt.bind([`%${indicators.ips[0] || ''}%`]);
+  while (tiStmt.step()) {
+    const ti = tiStmt.getAsObject();
+    if (indicators.ips.some(ip => ti.content.includes(ip))) {
+      matches.push({ type: 'ip', value: indicators.ips.find(ip => ti.content.includes(ip)), threat_intel_id: ti.id });
+    }
+  }
+  tiStmt.free();
+  
+  return matches;
+}
+
+async function sendWebhook(event, data) {
+  try {
+    const stmt = db.prepare('SELECT * FROM webhook_configs WHERE enabled = 1 AND events LIKE ?');
+    stmt.bind([`%${event}%`]);
+    const webhooks = [];
+    while (stmt.step()) {
+      webhooks.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    for (const wh of webhooks) {
+      try {
+        await axios.post(wh.url, { event, data, timestamp: new Date().toISOString() }, { timeout: 5000 });
+      } catch (e) {
+        console.error('Webhook error:', e.message);
+      }
+    }
+  } catch (e) {
+    console.error('Webhook config error:', e.message);
+  }
+}
+
+app.get('/api/logs/timeline', (req, res) => {
+  try {
+    const { start, end, interval = 'hour' } = req.query;
+    
+    let query = 'SELECT timestamp, level, source FROM logs WHERE 1=1';
+    const params = [];
+    
+    if (start) { query += ' AND timestamp >= ?'; params.push(start); }
+    if (end) { query += ' AND timestamp <= ?'; params.push(end); }
+    
+    query += ' ORDER BY timestamp ASC';
+    
+    const stmt = db.prepare(query);
+    stmt.bind(params);
+    const logs = [];
+    while (stmt.step()) {
+      logs.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    const buckets = {};
+    logs.forEach(log => {
+      const ts = new Date(log.timestamp);
+      let key;
+      if (interval === 'minute') {
+        key = ts.toISOString().slice(0, 16);
+      } else if (interval === 'hour') {
+        key = ts.toISOString().slice(0, 13);
+      } else if (interval === 'day') {
+        key = ts.toISOString().slice(0, 10);
+      }
+      
+      if (!buckets[key]) {
+        buckets[key] = { timestamp: key, total: 0, critical: 0, error: 0, warn: 0, info: 0, debug: 0 };
+      }
+      buckets[key].total++;
+      const lvl = log.level?.toLowerCase() || 'info';
+      if (['critical', 'fatal'].includes(lvl)) buckets[key].critical++;
+      else if (lvl === 'error') buckets[key].error++;
+      else if (lvl === 'warn' || lvl === 'warning') buckets[key].warn++;
+      else if (lvl === 'info') buckets[key].info++;
+      else buckets[key].debug++;
+    });
+    
+    const timeline = Object.values(buckets).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    res.json(timeline);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/cases', (req, res) => {
+  try {
+    const { title, description, severity = 'Medium' } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+    
+    const stmt = db.prepare('INSERT INTO cases (title, description, severity) VALUES (?, ?, ?)');
+    stmt.run([title, description || '', severity]);
+    stmt.free();
+    
+    saveDb();
+    
+    const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+    res.json({ success: true, id });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/cases', (req, res) => {
+  try {
+    const { status } = req.query;
+    let query = 'SELECT * FROM cases';
+    const params = [];
+    if (status) { query += ' WHERE status = ?'; params.push(status); }
+    query += ' ORDER BY created_at DESC';
+    
+    const stmt = db.prepare(query);
+    stmt.bind(params);
+    const cases = [];
+    while (stmt.step()) {
+      cases.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(cases);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/cases/:id', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT * FROM cases WHERE id = ?');
+    stmt.bind([parseInt(req.params.id)]);
+    if (stmt.step()) {
+      const caseData = stmt.getAsObject();
+      stmt.free();
+      
+      const notesStmt = db.prepare('SELECT * FROM case_notes WHERE case_id = ? ORDER BY created_at DESC');
+      notesStmt.bind([caseData.id]);
+      const notes = [];
+      while (notesStmt.step()) {
+        notes.push(notesStmt.getAsObject());
+      }
+      notesStmt.free();
+      
+      const logsStmt = db.prepare(`
+        SELECT l.* FROM logs l
+        JOIN case_logs cl ON l.id = cl.log_id
+        WHERE cl.case_id = ?
+        ORDER BY l.timestamp ASC
+      `);
+      logsStmt.bind([caseData.id]);
+      const linkedLogs = [];
+      while (logsStmt.step()) {
+        linkedLogs.push(logsStmt.getAsObject());
+      }
+      logsStmt.free();
+      
+      res.json({ ...caseData, notes, linkedLogs });
+    } else {
+      stmt.free();
+      res.status(404).json({ error: 'Case not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/cases/:id', (req, res) => {
+  try {
+    const { title, description, severity, status } = req.body;
+    const stmt = db.prepare(`
+      UPDATE cases SET title = COALESCE(?, title), description = COALESCE(?, description),
+      severity = COALESCE(?, severity), status = COALESCE(?, status), updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run([title, description, severity, status, parseInt(req.params.id)]);
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/cases/:id', (req, res) => {
+  try {
+    db.run('DELETE FROM case_notes WHERE case_id = ?', [parseInt(req.params.id)]);
+    db.run('DELETE FROM case_logs WHERE case_id = ?', [parseInt(req.params.id)]);
+    db.run('DELETE FROM cases WHERE id = ?', [parseInt(req.params.id)]);
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/cases/:id/notes', (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: 'Content is required' });
+    
+    const stmt = db.prepare('INSERT INTO case_notes (case_id, content) VALUES (?, ?)');
+    stmt.run([parseInt(req.params.id), content]);
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/cases/:id/logs', (req, res) => {
+  try {
+    const { logIds } = req.body;
+    if (!logIds || !Array.isArray(logIds)) {
+      return res.status(400).json({ error: 'logIds array is required' });
+    }
+    
+    const stmt = db.prepare('INSERT OR IGNORE INTO case_logs (case_id, log_id) VALUES (?, ?)');
+    for (const logId of logIds) {
+      stmt.run([parseInt(req.params.id), logId]);
+    }
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard', (req, res) => {
+  try {
+    let stmt = db.prepare('SELECT COUNT(*) as count FROM logs');
+    stmt.step();
+    const totalLogs = stmt.getAsObject().count;
+    stmt.free();
+    
+    stmt = db.prepare('SELECT COUNT(*) as count FROM cases WHERE status = "Open"');
+    stmt.step();
+    const openCases = stmt.getAsObject().count;
+    stmt.free();
+    
+    stmt = db.prepare('SELECT level, COUNT(*) as count FROM logs GROUP BY level');
+    const levelCounts = {};
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      levelCounts[row.level] = row.count;
+    }
+    stmt.free();
+    
+    stmt = db.prepare('SELECT COUNT(*) as count FROM ioc_matches');
+    stmt.step();
+    const iocMatches = stmt.getAsObject().count;
+    stmt.free();
+    
+    stmt = db.prepare('SELECT COUNT(*) as count FROM threat_intel');
+    stmt.step();
+    const threatIntelCount = stmt.getAsObject().count;
+    stmt.free();
+    
+    stmt = db.prepare(`
+      SELECT DATE(timestamp) as date, COUNT(*) as count 
+      FROM logs 
+      WHERE timestamp >= DATE('now', '-7 days')
+      GROUP BY DATE(timestamp)
+      ORDER BY date ASC
+    `);
+    const recentTrend = [];
+    while (stmt.step()) {
+      recentTrend.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    stmt = db.prepare(`
+      SELECT source, COUNT(*) as count FROM logs 
+      GROUP BY source ORDER BY count DESC LIMIT 5
+    `);
+    const topSources = [];
+    while (stmt.step()) {
+      topSources.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    res.json({
+      totalLogs,
+      openCases,
+      levelCounts,
+      iocMatches,
+      threatIntelCount,
+      recentTrend,
+      topSources
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/logs/severity', (req, res) => {
+  try {
+    const { id } = req.query;
+    const stmt = db.prepare('SELECT * FROM logs WHERE id = ?');
+    stmt.bind([parseInt(id)]);
+    if (stmt.step()) {
+      const log = stmt.getAsObject();
+      stmt.free();
+      
+      const indicators = extractIndicators(log.raw || log.message || '');
+      const severity = calculateSeverity(log.level, indicators);
+      const mitre = mapToMitre(log);
+      
+      res.json({ severity, mitre, indicators });
+    } else {
+      stmt.free();
+      res.status(404).json({ error: 'Log not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/mitre', (req, res) => {
+  res.json(MITRE_TECHNIQUES);
+});
+
+app.post('/api/threat-intel/misp/import', async (req, res) => {
+  try {
+    const { url, apiKey } = req.body;
+    if (!url || !apiKey) return res.status(400).json({ error: 'MISP URL and API key required' });
+    
+    const response = await axios.get(`${url}/events`, {
+      headers: { 'Authorization': apiKey },
+      params: { limit: 50 }
+    });
+    
+    const events = response.data.response || [];
+    let imported = 0;
+    
+    for (const event of events) {
+      const content = JSON.stringify(event);
+      const title = event.Event?.info || `MISP Event ${event.Event?.id}`;
+      
+      const stmt = db.prepare('INSERT INTO threat_intel (title, source_type, content) VALUES (?, ?, ?)');
+      stmt.run([title, 'misp', content]);
+      imported++;
+    }
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true, imported });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/threat-intel/stix/import', (req, res) => {
+  try {
+    const { bundle } = req.body;
+    if (!bundle) return res.status(400).json({ error: 'STIX bundle required' });
+    
+    const objects = bundle.objects || [];
+    let imported = 0;
+    
+    for (const obj of objects) {
+      if (obj.type === 'indicator' || obj.type === 'malware' || obj.type === 'attack-pattern') {
+        const content = JSON.stringify(obj);
+        const title = obj.name || obj.pattern || `STIX ${obj.type}`;
+        
+        const stmt = db.prepare('INSERT INTO threat_intel (title, source_type, content) VALUES (?, ?, ?)');
+        stmt.run([title, 'stix', content]);
+        imported++;
+      }
+    }
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true, imported });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ioc/match', async (req, res) => {
+  try {
+    const { logId } = req.body;
+    if (!logId) return res.status(400).json({ error: 'logId required' });
+    
+    const stmt = db.prepare('SELECT * FROM logs WHERE id = ?');
+    stmt.bind([parseInt(logId)]);
+    if (!stmt.step()) {
+      stmt.free();
+      return res.status(404).json({ error: 'Log not found' });
+    }
+    const log = stmt.getAsObject();
+    stmt.free();
+    
+    const matches = await checkIocMatches(log);
+    
+    for (const match of matches) {
+      const insertStmt = db.prepare(`
+        INSERT INTO ioc_matches (log_id, indicator, indicator_type, threat_intel_id)
+        VALUES (?, ?, ?, ?)
+      `);
+      insertStmt.run([logId, match.value, match.type, match.threat_intel_id]);
+      insertStmt.free();
+    }
+    
+    saveDb();
+    res.json({ success: true, matches });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/ioc/matches', (req, res) => {
+  try {
+    const stmt = db.prepare(`
+      SELECT im.*, l.timestamp, l.level, l.source, l.message
+      FROM ioc_matches im
+      JOIN logs l ON im.log_id = l.id
+      ORDER BY im.matched_at DESC
+      LIMIT 100
+    `);
+    const matches = [];
+    while (stmt.step()) {
+      matches.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(matches);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/config/webhooks', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT * FROM webhook_configs ORDER BY created_at DESC');
+    const configs = [];
+    while (stmt.step()) {
+      configs.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(configs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/config/webhooks', (req, res) => {
+  try {
+    const { name, url, events, enabled = true } = req.body;
+    if (!name || !url || !events) {
+      return res.status(400).json({ error: 'name, url, and events are required' });
+    }
+    
+    const stmt = db.prepare('INSERT INTO webhook_configs (name, url, events, enabled) VALUES (?, ?, ?, ?)');
+    stmt.run([name, url, JSON.stringify(events), enabled ? 1 : 0]);
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/config/webhooks/:id', (req, res) => {
+  try {
+    db.run('DELETE FROM webhook_configs WHERE id = ?', [parseInt(req.params.id)]);
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/config/webhooks/:id/test', async (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT * FROM webhook_configs WHERE id = ?');
+    stmt.bind([parseInt(req.params.id)]);
+    if (!stmt.step()) {
+      stmt.free();
+      return res.status(404).json({ error: 'Webhook not found' });
+    }
+    const webhook = stmt.getAsObject();
+    stmt.free();
+    
+    await axios.post(webhook.url, { test: true, timestamp: new Date().toISOString() }, { timeout: 5000 });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/config/forwarding', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT * FROM forwarding_configs ORDER BY created_at DESC');
+    const configs = [];
+    while (stmt.step()) {
+      configs.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(configs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/config/forwarding', (req, res) => {
+  try {
+    const { name, type, config, enabled = true } = req.body;
+    if (!name || !type || !config) {
+      return res.status(400).json({ error: 'name, type, and config are required' });
+    }
+    
+    const stmt = db.prepare('INSERT INTO forwarding_configs (name, type, config, enabled) VALUES (?, ?, ?, ?)');
+    stmt.run([name, type, JSON.stringify(config), enabled ? 1 : 0]);
+    stmt.free();
+    
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/config/forwarding/:id', (req, res) => {
+  try {
+    db.run('DELETE FROM forwarding_configs WHERE id = ?', [parseInt(req.params.id)]);
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/forward/test', async (req, res) => {
+  try {
+    const { type, config } = req.body;
+    
+    if (type === 'syslog') {
+      const dgram = require('dgram');
+      const client = dgram.createSocket('udp4');
+      const message = Buffer.from(JSON.stringify({ test: true, timestamp: new Date().toISOString() }));
+      client.send(message, 0, message.length, config.port || 514, config.host || 'localhost', (err) => {
+        client.close();
+        if (err) throw err;
+        res.json({ success: true });
+      });
+    } else if (type === 'http') {
+      await axios.post(config.url, { test: true, timestamp: new Date().toISOString() }, { timeout: 5000 });
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'Unknown forwarding type' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'IR Log Analyzer API',
+    version: '2.0.0',
+    endpoints: {
+      logs: ['GET /api/logs', 'POST /api/logs/import', 'GET /api/logs/:id', 'DELETE /api/logs', 'GET /api/logs/export', 'GET /api/logs/timeline'],
+      threat_intel: ['GET /api/threat-intel', 'POST /api/threat-intel/import', 'POST /api/threat-intel/url', 'POST /api/threat-intel/misp/import', 'POST /api/threat-intel/stix/import'],
+      analysis: ['POST /api/analyze', 'GET /api/reports', 'GET /api/logs/severity', 'GET /api/mitre', 'POST /api/ioc/match', 'GET /api/ioc/matches'],
+      cases: ['GET /api/cases', 'POST /api/cases', 'GET /api/cases/:id', 'PUT /api/cases/:id', 'DELETE /api/cases/:id', 'POST /api/cases/:id/notes', 'POST /api/cases/:id/logs'],
+      config: ['GET /api/config/ollama', 'POST /api/config/ollama', 'GET /api/config/webhooks', 'POST /api/config/webhooks', 'GET /api/config/forwarding', 'POST /api/config/forwarding'],
+      other: ['GET /api/dashboard', 'GET /api/stats', 'GET /api/chef']
+    }
+  });
 });
 
 initDb().then(() => {
