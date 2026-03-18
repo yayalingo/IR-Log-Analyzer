@@ -13,6 +13,69 @@ const app = express();
 const PORT = 3000;
 const DB_PATH = path.join(__dirname, 'ir-logs.db');
 
+const AUTH_USER = 'sanya';
+const AUTH_PASS = 'sanya';
+
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000;
+const RATE_LIMIT_MAX = 100;
+
+function rateLimitMiddleware(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  const record = rateLimitMap.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW };
+  
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + RATE_LIMIT_WINDOW;
+  } else {
+    record.count++;
+  }
+  
+  rateLimitMap.set(ip, record);
+  
+  if (record.count > RATE_LIMIT_MAX) {
+    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+  }
+  next();
+}
+
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  const base64Credentials = authHeader.split(' ')[1];
+  if (!base64Credentials) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+  const [username, password] = credentials.split(':');
+  
+  if (username === AUTH_USER && password === AUTH_PASS) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+}
+
+function isValidUrl(urlString) {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+    const invalidHosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1', 'metadata.google.internal', '169.254.169.254'];
+    if (invalidHosts.includes(hostname) || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.16.') || hostname.startsWith('172.17.') || hostname.startsWith('172.18.') || hostname.startsWith('172.19.') || hostname.startsWith('172.2') || hostname.startsWith('172.30.') || hostname.startsWith('172.31.')) {
+      return false;
+    }
+    return ['http:', 'https:'].includes(url.protocol);
+  } catch (e) {
+    return false;
+  }
+}
+
 let db;
 
 async function initDb() {
@@ -168,8 +231,61 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, buffer);
 }
 
+function getLastInsertId() {
+  const result = db.exec('SELECT last_insert_rowid()');
+  if (result && result[0] && result[0].values && result[0].values[0]) {
+    return result[0].values[0][0];
+  }
+  return null;
+}
+
+app.use(rateLimitMiddleware);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === AUTH_USER && password === AUTH_PASS) {
+    const token = crypto.randomBytes(32).toString('hex');
+    res.json({ success: true, token });
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+app.get('/api/auth-check', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.json({ authenticated: false });
+  
+  const base64Credentials = authHeader.split(' ')[1];
+  if (!base64Credentials) return res.json({ authenticated: false });
+  
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+  const [username, password] = credentials.split(':');
+  
+  if (username === AUTH_USER && password === AUTH_PASS) {
+    res.json({ authenticated: true });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Authentication required' });
+  
+  const base64Credentials = authHeader.split(' ')[1];
+  if (!base64Credentials) return res.status(401).json({ error: 'Authentication required' });
+  
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+  const [username, password] = credentials.split(':');
+  
+  if (username === AUTH_USER && password === AUTH_PASS) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+}
 
 const upload = multer({ 
   dest: '/tmp/',
@@ -425,7 +541,7 @@ const extractIndicators = (text) => {
   return indicators;
 };
 
-app.post('/api/logs/import', upload.single('file'), (req, res) => {
+app.post('/api/logs/import', requireAuth, upload.single('file'), (req, res) => {
   try {
     let logs = [];
     let filename = 'upload.log';
@@ -468,7 +584,7 @@ app.post('/api/logs/import', upload.single('file'), (req, res) => {
   }
 });
 
-app.get('/api/logs', (req, res) => {
+app.get('/api/logs', requireAuth, (req, res) => {
   try {
     const { start, end, source, level, search, limit = 500, offset = 0 } = req.query;
     
@@ -528,7 +644,7 @@ app.get('/api/logs', (req, res) => {
   }
 });
 
-app.get('/api/logs/:id', (req, res) => {
+app.get('/api/logs/:id', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM logs WHERE id = ?');
     stmt.bind([parseInt(req.params.id)]);
@@ -545,7 +661,7 @@ app.get('/api/logs/:id', (req, res) => {
   }
 });
 
-app.post('/api/enrich', async (req, res) => {
+app.post('/api/enrich', requireAuth, async (req, res) => {
   try {
     const { indicator, type } = req.body;
     if (!indicator || !type) {
@@ -615,7 +731,7 @@ async function doEnrichment(indicator, type, apiKey, res) {
   res.json({ indicator, type, result, cached: false });
 }
 
-app.get('/api/enrich/:indicator', (req, res) => {
+app.get('/api/enrich/:indicator', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM enrichments WHERE indicator = ?');
     stmt.bind([req.params.indicator]);
@@ -631,7 +747,7 @@ app.get('/api/enrich/:indicator', (req, res) => {
   }
 });
 
-app.post('/api/config/vt-key', (req, res) => {
+app.post('/api/config/vt-key', requireAuth, (req, res) => {
   const { apiKey } = req.body;
   if (!apiKey) return res.status(400).json({ error: 'Missing apiKey' });
   
@@ -639,7 +755,7 @@ app.post('/api/config/vt-key', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/config/vt-key', (req, res) => {
+app.get('/api/config/vt-key', requireAuth, (req, res) => {
   const keyPath = path.join(__dirname, '.vt-key');
   const hasKey = fs.existsSync(keyPath);
   res.json({ configured: hasKey });
@@ -656,11 +772,11 @@ function getExtractConfig() {
   return { ip: true, hostname: true, url: true, hash: true };
 }
 
-app.get('/api/config/extraction', (req, res) => {
+app.get('/api/config/extraction', requireAuth, (req, res) => {
   res.json(getExtractConfig());
 });
 
-app.post('/api/config/extraction', (req, res) => {
+app.post('/api/config/extraction', requireAuth, (req, res) => {
   const { ip, hostname, url, hash } = req.body;
   const config = {
     ip: ip === true || ip === 'true',
@@ -672,7 +788,7 @@ app.post('/api/config/extraction', (req, res) => {
   res.json({ success: true, config });
 });
 
-app.delete('/api/logs', (req, res) => {
+app.delete('/api/logs', requireAuth, (req, res) => {
   try {
     db.run('DELETE FROM logs');
     db.run('DELETE FROM enrichments');
@@ -683,7 +799,7 @@ app.delete('/api/logs', (req, res) => {
   }
 });
 
-app.get('/api/logs/export', (req, res) => {
+app.get('/api/logs/export', requireAuth, (req, res) => {
   try {
     const { start, end, source, level, search } = req.query;
     
@@ -727,7 +843,7 @@ app.get('/api/logs/export', (req, res) => {
   }
 });
 
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', requireAuth, (req, res) => {
   try {
     let stmt = db.prepare('SELECT COUNT(*) as count FROM logs');
     stmt.step();
@@ -759,18 +875,18 @@ app.get('/api/stats', (req, res) => {
   }
 });
 
-app.get('/api/config/ollama', (req, res) => {
+app.get('/api/config/ollama', requireAuth, (req, res) => {
   const config = loadOllamaConfig();
   res.json(config);
 });
 
-app.post('/api/config/ollama', (req, res) => {
+app.post('/api/config/ollama', requireAuth, (req, res) => {
   const { url, model } = req.body;
   const config = saveOllamaConfig({ url, model });
   res.json(config);
 });
 
-app.post('/api/threat-intel/import', upload.single('file'), (req, res) => {
+app.post('/api/threat-intel/import', requireAuth, upload.single('file'), (req, res) => {
   try {
     let content = '';
     let fileName = '';
@@ -797,17 +913,21 @@ app.post('/api/threat-intel/import', upload.single('file'), (req, res) => {
     
     saveDb();
     
-    res.json({ success: true, id: db.exec('SELECT last_insert_rowid()')[0].values[0][0] });
+    res.json({ success: true, id: getLastInsertId() });
   } catch (error) {
     console.error('Threat intel import error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/threat-intel/url', async (req, res) => {
+app.post('/api/threat-intel/url', requireAuth, async (req, res) => {
   try {
     const { url, title } = req.body;
     if (!url) return res.status(400).json({ error: 'URL is required' });
+    
+    if (!isValidUrl(url)) {
+      return res.status(400).json({ error: 'Invalid or disallowed URL' });
+    }
     
     const response = await axios.get(url, { timeout: 30000 });
     const $ = cheerio.load(response.data);
@@ -826,14 +946,14 @@ app.post('/api/threat-intel/url', async (req, res) => {
     
     saveDb();
     
-    res.json({ success: true, id: db.exec('SELECT last_insert_rowid()')[0].values[0][0], title: pageTitle });
+    res.json({ success: true, id: getLastInsertId(), title: pageTitle });
   } catch (error) {
     console.error('URL fetch error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/threat-intel', (req, res) => {
+app.get('/api/threat-intel', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT id, title, source_type, url, file_name, created_at FROM threat_intel ORDER BY created_at DESC');
     const items = [];
@@ -847,7 +967,7 @@ app.get('/api/threat-intel', (req, res) => {
   }
 });
 
-app.get('/api/threat-intel/:id', (req, res) => {
+app.get('/api/threat-intel/:id', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM threat_intel WHERE id = ?');
     stmt.bind([parseInt(req.params.id)]);
@@ -863,7 +983,7 @@ app.get('/api/threat-intel/:id', (req, res) => {
   }
 });
 
-app.delete('/api/threat-intel/:id', (req, res) => {
+app.delete('/api/threat-intel/:id', requireAuth, (req, res) => {
   try {
     db.run('DELETE FROM threat_intel WHERE id = ?', [parseInt(req.params.id)]);
     saveDb();
@@ -873,20 +993,45 @@ app.delete('/api/threat-intel/:id', (req, res) => {
   }
 });
 
-app.post('/api/analyze', async (req, res) => {
+app.post('/api/analyze', requireAuth, async (req, res) => {
   try {
     const config = loadOllamaConfig();
-    const { scope, customPrompt } = req.body;
+    const { scope, customPrompt, caseId } = req.body;
     
-    let logQuery = 'SELECT * FROM logs ORDER BY timestamp ASC';
-    const logs = [];
-    let stmt = db.prepare(logQuery);
-    while (stmt.step()) {
-      logs.push(stmt.getAsObject());
+    let logs = [];
+    let logCount = 0;
+    let caseInfo = null;
+    
+    if (caseId) {
+      const caseStmt = db.prepare('SELECT * FROM cases WHERE id = ?');
+      caseStmt.bind([parseInt(caseId)]);
+      if (caseStmt.step()) {
+        caseInfo = caseStmt.getAsObject();
+      }
+      caseStmt.free();
+      
+      const logsStmt = db.prepare(`
+        SELECT l.* FROM logs l
+        JOIN case_logs cl ON l.id = cl.log_id
+        WHERE cl.case_id = ?
+        ORDER BY l.timestamp ASC
+      `);
+      logsStmt.bind([parseInt(caseId)]);
+      while (logsStmt.step()) {
+        logs.push(logsStmt.getAsObject());
+      }
+      logsStmt.free();
+      logCount = logs.length;
+    } else {
+      let logQuery = 'SELECT * FROM logs ORDER BY timestamp ASC';
+      const stmt = db.prepare(logQuery);
+      while (stmt.step()) {
+        logs.push(stmt.getAsObject());
+      }
+      stmt.free();
+      logCount = logs.length;
     }
-    stmt.free();
     
-    const logCount = logs.length;
     const logLimit = scope?.logLimit || 100;
     const sampleLogs = logs.slice(-logLimit);
     
@@ -901,13 +1046,21 @@ app.post('/api/analyze', async (req, res) => {
       ? `THREAT INTELLIGENCE REFERENCES:\n${threatIntel.map(t => `[${t.title}] ${t.content.substring(0, 2000)}`).join('\n\n')}`
       : '';
     
-    const logsContext = `LOG DATA (last ${sampleLogs.length} of ${logCount} logs):\n${sampleLogs.map(l => 
-      `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
-    ).join('\n')}`;
+    const caseContext = caseInfo 
+      ? `CASE INFORMATION:\nTitle: ${caseInfo.title}\nSeverity: ${caseInfo.severity}\nStatus: ${caseInfo.status}\nDescription: ${caseInfo.description || 'N/A'}\n\n`
+      : '';
+    
+    const logsContext = caseId
+      ? `LOG DATA (${sampleLogs.length} of ${logCount} case-linked logs):\n${sampleLogs.map(l => 
+        `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
+      ).join('\n')}`
+      : `LOG DATA (last ${sampleLogs.length} of ${logCount} logs):\n${sampleLogs.map(l => 
+        `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
+      ).join('\n')}`;
     
     const defaultPrompt = `You are a cybersecurity incident response analyst. Analyze the following logs and threat intelligence to produce a comprehensive investigation report.
 
-${tiContext}
+${caseContext}${tiContext}
 
 ${logsContext}
 
@@ -937,15 +1090,17 @@ Focus on security-relevant events, errors, warnings, and suspicious patterns.`;
         INSERT INTO reports (title, content, logs_analyzed, threat_intel_count)
         VALUES (?, ?, ?, ?)
       `);
-      const reportTitle = `Investigation Report - ${new Date().toISOString().slice(0,10)}`;
+      const reportTitle = caseInfo 
+        ? `Investigation Report - ${caseInfo.title} - ${new Date().toISOString().slice(0,10)}`
+        : `Investigation Report - ${new Date().toISOString().slice(0,10)}`;
       reportStmt.run([reportTitle, analysis, logCount, threatIntel.length]);
       reportStmt.free();
       
       saveDb();
       
-      const reportId = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+      const reportId = getLastInsertId();
       
-      res.json({ success: true, report: { id: reportId, title: reportTitle, content: analysis } });
+      res.json({ success: true, report: { id: reportId, title: reportTitle, content: analysis }, caseId: caseId ? parseInt(caseId) : null });
     } catch (ollamaError) {
       console.error('Ollama error:', ollamaError.message);
       res.status(500).json({ error: `Ollama API error: ${ollamaError.message}` });
@@ -956,7 +1111,7 @@ Focus on security-relevant events, errors, warnings, and suspicious patterns.`;
   }
 });
 
-app.get('/api/reports', (req, res) => {
+app.get('/api/reports', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT id, title, logs_analyzed, threat_intel_count, created_at FROM reports ORDER BY created_at DESC');
     const reports = [];
@@ -970,7 +1125,7 @@ app.get('/api/reports', (req, res) => {
   }
 });
 
-app.get('/api/reports/:id', (req, res) => {
+app.get('/api/reports/:id', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM reports WHERE id = ?');
     stmt.bind([parseInt(req.params.id)]);
@@ -986,7 +1141,7 @@ app.get('/api/reports/:id', (req, res) => {
   }
 });
 
-app.delete('/api/reports/:id', (req, res) => {
+app.delete('/api/reports/:id', requireAuth, (req, res) => {
   try {
     db.run('DELETE FROM reports WHERE id = ?', [parseInt(req.params.id)]);
     saveDb();
@@ -1136,7 +1291,7 @@ async function sendWebhook(event, data) {
   }
 }
 
-app.get('/api/logs/timeline', (req, res) => {
+app.get('/api/logs/timeline', requireAuth, (req, res) => {
   try {
     const { start, end, interval = 'hour' } = req.query;
     
@@ -1187,7 +1342,7 @@ app.get('/api/logs/timeline', (req, res) => {
   }
 });
 
-app.post('/api/cases', (req, res) => {
+app.post('/api/cases', requireAuth, (req, res) => {
   try {
     const { title, description, severity = 'Medium' } = req.body;
     if (!title) return res.status(400).json({ error: 'Title is required' });
@@ -1198,14 +1353,14 @@ app.post('/api/cases', (req, res) => {
     
     saveDb();
     
-    const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+    const id = getLastInsertId();
     res.json({ success: true, id });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/cases', (req, res) => {
+app.get('/api/cases', requireAuth, (req, res) => {
   try {
     const { status } = req.query;
     let query = 'SELECT * FROM cases';
@@ -1217,7 +1372,13 @@ app.get('/api/cases', (req, res) => {
     stmt.bind(params);
     const cases = [];
     while (stmt.step()) {
-      cases.push(stmt.getAsObject());
+      const c = stmt.getAsObject();
+      const countStmt = db.prepare('SELECT COUNT(*) as count FROM case_logs WHERE case_id = ?');
+      countStmt.bind([c.id]);
+      countStmt.step();
+      c.linked_logs_count = countStmt.getAsObject().count;
+      countStmt.free();
+      cases.push(c);
     }
     stmt.free();
     res.json(cases);
@@ -1226,7 +1387,7 @@ app.get('/api/cases', (req, res) => {
   }
 });
 
-app.get('/api/cases/:id', (req, res) => {
+app.get('/api/cases/:id', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM cases WHERE id = ?');
     stmt.bind([parseInt(req.params.id)]);
@@ -1265,7 +1426,7 @@ app.get('/api/cases/:id', (req, res) => {
   }
 });
 
-app.put('/api/cases/:id', (req, res) => {
+app.put('/api/cases/:id', requireAuth, (req, res) => {
   try {
     const { title, description, severity, status } = req.body;
     const stmt = db.prepare(`
@@ -1283,7 +1444,7 @@ app.put('/api/cases/:id', (req, res) => {
   }
 });
 
-app.delete('/api/cases/:id', (req, res) => {
+app.delete('/api/cases/:id', requireAuth, (req, res) => {
   try {
     db.run('DELETE FROM case_notes WHERE case_id = ?', [parseInt(req.params.id)]);
     db.run('DELETE FROM case_logs WHERE case_id = ?', [parseInt(req.params.id)]);
@@ -1295,7 +1456,7 @@ app.delete('/api/cases/:id', (req, res) => {
   }
 });
 
-app.post('/api/cases/:id/notes', (req, res) => {
+app.post('/api/cases/:id/notes', requireAuth, (req, res) => {
   try {
     const { content } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
@@ -1311,7 +1472,7 @@ app.post('/api/cases/:id/notes', (req, res) => {
   }
 });
 
-app.post('/api/cases/:id/logs', (req, res) => {
+app.post('/api/cases/:id/logs', requireAuth, (req, res) => {
   try {
     const { logIds } = req.body;
     if (!logIds || !Array.isArray(logIds)) {
@@ -1331,7 +1492,7 @@ app.post('/api/cases/:id/logs', (req, res) => {
   }
 });
 
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', requireAuth, (req, res) => {
   try {
     let stmt = db.prepare('SELECT COUNT(*) as count FROM logs');
     stmt.step();
@@ -1398,7 +1559,7 @@ app.get('/api/dashboard', (req, res) => {
   }
 });
 
-app.get('/api/logs/severity', (req, res) => {
+app.get('/api/logs/severity', requireAuth, (req, res) => {
   try {
     const { id } = req.query;
     const stmt = db.prepare('SELECT * FROM logs WHERE id = ?');
@@ -1421,11 +1582,11 @@ app.get('/api/logs/severity', (req, res) => {
   }
 });
 
-app.get('/api/mitre', (req, res) => {
+app.get('/api/mitre', requireAuth, (req, res) => {
   res.json(MITRE_TECHNIQUES);
 });
 
-app.post('/api/threat-intel/misp/import', async (req, res) => {
+app.post('/api/threat-intel/misp/import', requireAuth, async (req, res) => {
   try {
     const { url, apiKey } = req.body;
     if (!url || !apiKey) return res.status(400).json({ error: 'MISP URL and API key required' });
@@ -1444,9 +1605,9 @@ app.post('/api/threat-intel/misp/import', async (req, res) => {
       
       const stmt = db.prepare('INSERT INTO threat_intel (title, source_type, content) VALUES (?, ?, ?)');
       stmt.run([title, 'misp', content]);
+      stmt.free();
       imported++;
     }
-    stmt.free();
     
     saveDb();
     res.json({ success: true, imported });
@@ -1455,7 +1616,7 @@ app.post('/api/threat-intel/misp/import', async (req, res) => {
   }
 });
 
-app.post('/api/threat-intel/stix/import', (req, res) => {
+app.post('/api/threat-intel/stix/import', requireAuth, (req, res) => {
   try {
     const { bundle } = req.body;
     if (!bundle) return res.status(400).json({ error: 'STIX bundle required' });
@@ -1470,10 +1631,10 @@ app.post('/api/threat-intel/stix/import', (req, res) => {
         
         const stmt = db.prepare('INSERT INTO threat_intel (title, source_type, content) VALUES (?, ?, ?)');
         stmt.run([title, 'stix', content]);
+        stmt.free();
         imported++;
       }
     }
-    stmt.free();
     
     saveDb();
     res.json({ success: true, imported });
@@ -1482,7 +1643,7 @@ app.post('/api/threat-intel/stix/import', (req, res) => {
   }
 });
 
-app.post('/api/ioc/match', async (req, res) => {
+app.post('/api/ioc/match', requireAuth, async (req, res) => {
   try {
     const { logId } = req.body;
     if (!logId) return res.status(400).json({ error: 'logId required' });
@@ -1514,7 +1675,7 @@ app.post('/api/ioc/match', async (req, res) => {
   }
 });
 
-app.get('/api/ioc/matches', (req, res) => {
+app.get('/api/ioc/matches', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare(`
       SELECT im.*, l.timestamp, l.level, l.source, l.message
@@ -1534,7 +1695,7 @@ app.get('/api/ioc/matches', (req, res) => {
   }
 });
 
-app.get('/api/config/webhooks', (req, res) => {
+app.get('/api/config/webhooks', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM webhook_configs ORDER BY created_at DESC');
     const configs = [];
@@ -1548,11 +1709,15 @@ app.get('/api/config/webhooks', (req, res) => {
   }
 });
 
-app.post('/api/config/webhooks', (req, res) => {
+app.post('/api/config/webhooks', requireAuth, (req, res) => {
   try {
     const { name, url, events, enabled = true } = req.body;
     if (!name || !url || !events) {
       return res.status(400).json({ error: 'name, url, and events are required' });
+    }
+    
+    if (!isValidUrl(url)) {
+      return res.status(400).json({ error: 'Invalid or disallowed URL' });
     }
     
     const stmt = db.prepare('INSERT INTO webhook_configs (name, url, events, enabled) VALUES (?, ?, ?, ?)');
@@ -1566,7 +1731,7 @@ app.post('/api/config/webhooks', (req, res) => {
   }
 });
 
-app.delete('/api/config/webhooks/:id', (req, res) => {
+app.delete('/api/config/webhooks/:id', requireAuth, (req, res) => {
   try {
     db.run('DELETE FROM webhook_configs WHERE id = ?', [parseInt(req.params.id)]);
     saveDb();
@@ -1576,7 +1741,7 @@ app.delete('/api/config/webhooks/:id', (req, res) => {
   }
 });
 
-app.post('/api/config/webhooks/:id/test', async (req, res) => {
+app.post('/api/config/webhooks/:id/test', requireAuth, async (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM webhook_configs WHERE id = ?');
     stmt.bind([parseInt(req.params.id)]);
@@ -1594,7 +1759,7 @@ app.post('/api/config/webhooks/:id/test', async (req, res) => {
   }
 });
 
-app.get('/api/config/forwarding', (req, res) => {
+app.get('/api/config/forwarding', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare('SELECT * FROM forwarding_configs ORDER BY created_at DESC');
     const configs = [];
@@ -1608,7 +1773,7 @@ app.get('/api/config/forwarding', (req, res) => {
   }
 });
 
-app.post('/api/config/forwarding', (req, res) => {
+app.post('/api/config/forwarding', requireAuth, (req, res) => {
   try {
     const { name, type, config, enabled = true } = req.body;
     if (!name || !type || !config) {
@@ -1626,7 +1791,7 @@ app.post('/api/config/forwarding', (req, res) => {
   }
 });
 
-app.delete('/api/config/forwarding/:id', (req, res) => {
+app.delete('/api/config/forwarding/:id', requireAuth, (req, res) => {
   try {
     db.run('DELETE FROM forwarding_configs WHERE id = ?', [parseInt(req.params.id)]);
     saveDb();
@@ -1636,7 +1801,7 @@ app.delete('/api/config/forwarding/:id', (req, res) => {
   }
 });
 
-app.post('/api/forward/test', async (req, res) => {
+app.post('/api/forward/test', requireAuth, async (req, res) => {
   try {
     const { type, config } = req.body;
     

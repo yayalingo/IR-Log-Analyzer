@@ -11,7 +11,7 @@ Incident Response Log Analysis Tool with Timeline Visualization and Threat Intel
 - **CSV Export**: Export filtered logs to CSV format
 - **Threat Intelligence**: Extract and enrich IPs, domains, URLs, and file hashes with VirusTotal
 - **Dark Mode**: Full dark theme UI for comfortable viewing
-- **MCP Server**: Connect via Model Context Protocol for AI integration
+- **Authentication**: Secure access with username/password
 
 ## Quick Start
 
@@ -28,6 +28,12 @@ npm start
 ```
 
 Open http://localhost:3000 in your browser.
+
+## Authentication
+
+The application requires authentication. Default credentials:
+- Username: `sanya`
+- Password: `sanya`
 
 ## Configuration
 
@@ -47,8 +53,12 @@ Get a free API key at [virustotal.com](https://www.virustotal.com)
 
 ## API Endpoints
 
+All API endpoints (except `/api/login` and `/api/auth-check`) require Basic Authentication.
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/login` | POST | Authenticate and get token |
+| `/api/auth-check` | GET | Check authentication status |
 | `/api/logs/import` | POST | Import logs |
 | `/api/logs` | GET | Query logs with filters |
 | `/api/logs/:id` | GET | Get log details |
@@ -56,22 +66,12 @@ Get a free API key at [virustotal.com](https://www.virustotal.com)
 | `/api/stats` | GET | Get statistics |
 | `/api/logs` | DELETE | Clear all logs |
 
-## MCP Server
+### Authentication
 
-Connect to AI assistants via Model Context Protocol. See `mcp-config.json` for configuration.
-
+Use Basic Authentication header:
 ```bash
-# Run MCP server
-node mcp-server.js
+curl -u sanya:sanya http://localhost:3000/api/logs
 ```
-
-### Available MCP Tools
-
-- `get_logs` - Query logs with filters
-- `get_log_detail` - Get log details with indicators
-- `enrich_indicator` - VT enrichment for IPs, domains, hashes
-- `import_logs` - Import log content
-- `get_stats` - Statistics overview
 
 ## Tech Stack
 

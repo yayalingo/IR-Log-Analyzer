@@ -281,6 +281,15 @@ body {
   background: var(--bg-hover);
 }
 
+.log-checkbox {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .log-entry.level-CRITICAL, .log-entry.level-FATAL {
   border-left-color: var(--critical);
   background: rgba(255, 123, 114, 0.1);
