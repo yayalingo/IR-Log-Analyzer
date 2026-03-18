@@ -14,6 +14,7 @@
         <span class="badge" id="logCount">0 logs</span>
       </div>
       <div class="header-right">
+        <button class="btn btn-secondary" id="ollamaConfigBtn">🤖 Ollama</button>
         <button class="btn btn-secondary" id="configBtn">⚙️ Config</button>
         <button class="btn btn-danger" id="clearBtn">Clear All</button>
       </div>
@@ -24,6 +25,10 @@
         <button class="btn btn-primary" id="uploadBtn">📁 Upload File</button>
         <button class="btn btn-primary" id="pasteBtn">📋 Paste Logs</button>
         <button class="btn btn-secondary" id="exportBtn">📥 Export CSV</button>
+        <button class="btn btn-accent" id="threatIntelBtn">🛡️ Threat Intel</button>
+        <button class="btn btn-accent" id="analyzeBtn">🤖 AI Analyze</button>
+        <button class="btn btn-secondary" id="reportsBtn">📊 Reports</button>
+        <button class="btn btn-secondary" id="chefBtn">🔪 CyberChef</button>
       </div>
       <div class="toolbar-filters">
         <input type="text" id="searchInput" placeholder="Search logs..." class="input">
@@ -191,6 +196,136 @@
 
   <input type="file" id="hiddenFileInput" hidden>
 
+  <div class="modal" id="threatIntelModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Threat Intelligence</h2>
+        <button class="close" id="closeThreatIntel">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="tabs">
+          <button class="tab active" data-tab="ti-file">📁 Upload File</button>
+          <button class="tab" data-tab="ti-url">🔗 URL</button>
+          <button class="tab" data-tab="ti-list">📋 List</button>
+        </div>
+        <div class="tab-content active" id="ti-file">
+          <div class="form-group">
+            <label>Title (optional)</label>
+            <input type="text" id="tiTitle" class="input" placeholder="Threat report title">
+          </div>
+          <div class="drop-zone" id="tiDropZone">
+            <p>Drag & drop threat intel file</p>
+            <p class="drop-zone-hint">or click to select (txt, pdf, json, md)</p>
+            <input type="file" id="tiFileInput" accept=".txt,.json,.md,.csv" hidden>
+          </div>
+          <div class="file-info" id="tiFileInfo"></div>
+        </div>
+        <div class="tab-content" id="ti-url">
+          <div class="form-group">
+            <label>Article URL</label>
+            <input type="url" id="tiUrl" class="input" placeholder="https://example.com/threat-report">
+          </div>
+          <div class="form-group">
+            <label>Title (optional)</label>
+            <input type="text" id="tiUrlTitle" class="input" placeholder="Report title">
+          </div>
+          <button class="btn btn-primary" id="fetchUrlBtn">Fetch Article</button>
+        </div>
+        <div class="tab-content" id="ti-list">
+          <div id="threatIntelList" class="item-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeThreatIntelBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="analyzeModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>AI Analysis</h2>
+        <button class="close" id="closeAnalyze">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Analysis Scope</label>
+          <select id="analysisScope" class="input select">
+            <option value="50">Last 50 logs</option>
+            <option value="100" selected>Last 100 logs</option>
+            <option value="200">Last 200 logs</option>
+            <option value="500">Last 500 logs</option>
+            <option value="all">All logs</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Custom Prompt (optional)</label>
+          <textarea id="customPrompt" class="textarea" rows="4" placeholder="Custom instructions for the AI..."></textarea>
+        </div>
+        <div class="analysis-status" id="analysisStatus"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelAnalyze">Cancel</button>
+        <button class="btn btn-primary" id="startAnalysis">🤖 Start Analysis</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="reportModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Investigation Report</h2>
+        <button class="close" id="closeReport">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="report-content" id="reportContent"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeReportBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="reportsListModal">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Saved Reports</h2>
+        <button class="close" id="closeReportsList">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="reportsList" class="item-list"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="closeReportsListBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="ollamaConfigModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>AI Configuration</h2>
+        <button class="close" id="closeOllamaConfig">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Ollama API URL</label>
+          <input type="url" id="ollamaUrl" class="input" placeholder="http://localhost:11434">
+        </div>
+        <div class="form-group">
+          <label>Model</label>
+          <input type="text" id="ollamaModel" class="input" placeholder="llama3">
+          <p class="form-hint">Available: llama3, llama2, mistral, codellama, etc.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelOllamaConfig">Cancel</button>
+        <button class="btn btn-primary" id="saveOllamaConfig">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

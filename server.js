@@ -5,6 +5,9 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
+const { marked } = require('marked');
+const cheerio = require('cheerio');
 
 const app = express();
 const PORT = 3000;
@@ -58,6 +61,32 @@ async function initDb() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)`);
   
+  db.run(`
+    CREATE TABLE IF NOT EXISTS threat_intel (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      source_type TEXT,
+      content TEXT,
+      url TEXT,
+      file_name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  
+  db.run(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT,
+      content TEXT,
+      logs_analyzed INTEGER,
+      threat_intel_count INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  
+  db.run(`CREATE INDEX IF NOT EXISTS idx_threat_intel_created ON threat_intel(created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at)`);
+  
   saveDb();
 }
 
@@ -76,6 +105,27 @@ const upload = multer({
 });
 
 const VT_API_KEY = process.env.VT_API_KEY || '';
+const OLLAMA_CONFIG_PATH = path.join(__dirname, '.ollama-config');
+
+let ollamaConfig = {
+  url: 'http://localhost:11434',
+  model: 'llama3'
+};
+
+function loadOllamaConfig() {
+  if (fs.existsSync(OLLAMA_CONFIG_PATH)) {
+    try {
+      ollamaConfig = JSON.parse(fs.readFileSync(OLLAMA_CONFIG_PATH, 'utf8'));
+    } catch(e) {}
+  }
+  return ollamaConfig;
+}
+
+function saveOllamaConfig(config) {
+  ollamaConfig = { ...ollamaConfig, ...config };
+  fs.writeFileSync(OLLAMA_CONFIG_PATH, JSON.stringify(ollamaConfig, null, 2));
+  return ollamaConfig;
+}
 
 const parseTimestamp = (line) => {
   const patterns = [
@@ -635,6 +685,247 @@ app.get('/api/stats', (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.get('/api/config/ollama', (req, res) => {
+  const config = loadOllamaConfig();
+  res.json(config);
+});
+
+app.post('/api/config/ollama', (req, res) => {
+  const { url, model } = req.body;
+  const config = saveOllamaConfig({ url, model });
+  res.json(config);
+});
+
+app.post('/api/threat-intel/import', upload.single('file'), (req, res) => {
+  try {
+    let content = '';
+    let fileName = '';
+    
+    if (req.file) {
+      fileName = req.file.originalname;
+      content = fs.readFileSync(req.file.path, 'utf8');
+      fs.unlinkSync(req.file.path);
+    } else if (req.body.content) {
+      content = req.body.content;
+      fileName = req.body.filename || 'manual-input.txt';
+    } else {
+      return res.status(400).json({ error: 'No content provided' });
+    }
+    
+    const title = req.body.title || fileName.substring(0, 100);
+    
+    const stmt = db.prepare(`
+      INSERT INTO threat_intel (title, source_type, content, file_name)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run([title, req.file ? 'file' : 'text', content, fileName]);
+    stmt.free();
+    
+    saveDb();
+    
+    res.json({ success: true, id: db.exec('SELECT last_insert_rowid()')[0].values[0][0] });
+  } catch (error) {
+    console.error('Threat intel import error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/threat-intel/url', async (req, res) => {
+  try {
+    const { url, title } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+    
+    const response = await axios.get(url, { timeout: 30000 });
+    const $ = cheerio.load(response.data);
+    
+    $('script, style, nav, footer, header, aside').remove();
+    const content = $('body').text().trim().substring(0, 50000);
+    
+    const pageTitle = title || $('title').text() || url;
+    
+    const stmt = db.prepare(`
+      INSERT INTO threat_intel (title, source_type, content, url)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run([pageTitle.substring(0, 100), 'url', content, url]);
+    stmt.free();
+    
+    saveDb();
+    
+    res.json({ success: true, id: db.exec('SELECT last_insert_rowid()')[0].values[0][0], title: pageTitle });
+  } catch (error) {
+    console.error('URL fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/threat-intel', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT id, title, source_type, url, file_name, created_at FROM threat_intel ORDER BY created_at DESC');
+    const items = [];
+    while (stmt.step()) {
+      items.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/threat-intel/:id', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT * FROM threat_intel WHERE id = ?');
+    stmt.bind([parseInt(req.params.id)]);
+    if (stmt.step()) {
+      const item = stmt.getAsObject();
+      stmt.free();
+      return res.json(item);
+    }
+    stmt.free();
+    res.status(404).json({ error: 'Not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/threat-intel/:id', (req, res) => {
+  try {
+    db.run('DELETE FROM threat_intel WHERE id = ?', [parseInt(req.params.id)]);
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const config = loadOllamaConfig();
+    const { scope, customPrompt } = req.body;
+    
+    let logQuery = 'SELECT * FROM logs ORDER BY timestamp ASC';
+    const logs = [];
+    let stmt = db.prepare(logQuery);
+    while (stmt.step()) {
+      logs.push(stmt.getAsObject());
+    }
+    stmt.free();
+    
+    const logCount = logs.length;
+    const logLimit = scope?.logLimit || 100;
+    const sampleLogs = logs.slice(-logLimit);
+    
+    const tiStmt = db.prepare('SELECT * FROM threat_intel ORDER BY created_at DESC');
+    const threatIntel = [];
+    while (tiStmt.step()) {
+      threatIntel.push(tiStmt.getAsObject());
+    }
+    tiStmt.free();
+    
+    const tiContext = threatIntel.length > 0 
+      ? `THREAT INTELLIGENCE REFERENCES:\n${threatIntel.map(t => `[${t.title}] ${t.content.substring(0, 2000)}`).join('\n\n')}`
+      : '';
+    
+    const logsContext = `LOG DATA (last ${sampleLogs.length} of ${logCount} logs):\n${sampleLogs.map(l => 
+      `[${l.timestamp}] [${l.level}] [${l.source}] ${l.message}`
+    ).join('\n')}`;
+    
+    const defaultPrompt = `You are a cybersecurity incident response analyst. Analyze the following logs and threat intelligence to produce a comprehensive investigation report.
+
+${tiContext}
+
+${logsContext}
+
+Based on your analysis, provide a detailed investigation report in markdown format with the following sections:
+1. **Executive Summary** - Brief overview of the incident
+2. **Timeline of Events** - Chronological sequence of suspicious activities
+3. **Key Findings** - Important observations and patterns
+4. **Indicators of Compromise (IOCs)** - IPs, domains, hashes, URLs identified
+5. **Attack Vector Analysis** - How the attack likely occurred
+6. **Severity Assessment** - Impact and criticality
+7. **Recommendations** - Next steps for containment and remediation
+
+Focus on security-relevant events, errors, warnings, and suspicious patterns.`;
+    
+    const prompt = customPrompt || defaultPrompt;
+    
+    try {
+      const ollamaRes = await axios.post(`${config.url}/api/generate`, {
+        model: config.model,
+        prompt: prompt,
+        stream: false
+      }, { timeout: 300000 });
+      
+      const analysis = ollamaRes.data.response;
+      
+      const reportStmt = db.prepare(`
+        INSERT INTO reports (title, content, logs_analyzed, threat_intel_count)
+        VALUES (?, ?, ?, ?)
+      `);
+      const reportTitle = `Investigation Report - ${new Date().toISOString().slice(0,10)}`;
+      reportStmt.run([reportTitle, analysis, logCount, threatIntel.length]);
+      reportStmt.free();
+      
+      saveDb();
+      
+      const reportId = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+      
+      res.json({ success: true, report: { id: reportId, title: reportTitle, content: analysis } });
+    } catch (ollamaError) {
+      console.error('Ollama error:', ollamaError.message);
+      res.status(500).json({ error: `Ollama API error: ${ollamaError.message}` });
+    }
+  } catch (error) {
+    console.error('Analysis error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/reports', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT id, title, logs_analyzed, threat_intel_count, created_at FROM reports ORDER BY created_at DESC');
+    const reports = [];
+    while (stmt.step()) {
+      reports.push(stmt.getAsObject());
+    }
+    stmt.free();
+    res.json(reports);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/reports/:id', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT * FROM reports WHERE id = ?');
+    stmt.bind([parseInt(req.params.id)]);
+    if (stmt.step()) {
+      const report = stmt.getAsObject();
+      stmt.free();
+      return res.json(report);
+    }
+    stmt.free();
+    res.status(404).json({ error: 'Not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/reports/:id', (req, res) => {
+  try {
+    db.run('DELETE FROM reports WHERE id = ?', [parseInt(req.params.id)]);
+    saveDb();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/chef', (req, res) => {
+  res.redirect('https://gchq.github.io/Chef炒/');
 });
 
 initDb().then(() => {

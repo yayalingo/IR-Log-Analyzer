@@ -532,4 +532,299 @@ function initColumnResize() {
 
 initColumnResize();
 
+const elements2 = {
+  threatIntelModal: document.getElementById('threatIntelModal'),
+  analyzeModal: document.getElementById('analyzeModal'),
+  reportModal: document.getElementById('reportModal'),
+  reportsListModal: document.getElementById('reportsListModal'),
+  ollamaConfigModal: document.getElementById('ollamaConfigModal'),
+  threatIntelList: document.getElementById('threatIntelList'),
+  reportsList: document.getElementById('reportsList'),
+  reportContent: document.getElementById('reportContent'),
+  analysisStatus: document.getElementById('analysisStatus'),
+  tiDropZone: document.getElementById('tiDropZone'),
+  tiFileInput: document.getElementById('tiFileInput'),
+  tiFileInfo: document.getElementById('tiFileInfo'),
+};
+
+let tiSelectedFile = null;
+
+document.getElementById('threatIntelBtn').addEventListener('click', async () => {
+  await loadThreatIntelList();
+  openModal(elements2.threatIntelModal);
+});
+
+document.getElementById('closeThreatIntel').addEventListener('click', () => closeModal(elements2.threatIntelModal));
+document.getElementById('closeThreatIntelBtn').addEventListener('click', () => closeModal(elements2.threatIntelModal));
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  });
+});
+
+elements2.tiDropZone.addEventListener('click', () => elements2.tiFileInput.click());
+elements2.tiDropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  elements2.tiDropZone.classList.add('dragover');
+});
+elements2.tiDropZone.addEventListener('dragleave', () => elements2.tiDropZone.classList.remove('dragover'));
+elements2.tiDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  elements2.tiDropZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    tiSelectedFile = e.dataTransfer.files[0];
+    elements2.tiFileInfo.innerHTML = `<strong>${tiSelectedFile.name}</strong> (${formatBytes(tiSelectedFile.size)})`;
+  }
+});
+
+elements2.tiFileInput.addEventListener('change', (e) => {
+  if (e.target.files.length) {
+    tiSelectedFile = e.target.files[0];
+    elements2.tiFileInfo.innerHTML = `<strong>${tiSelectedFile.name}</strong> (${formatBytes(tiSelectedFile.size)})`;
+  }
+});
+
+document.getElementById('fetchUrlBtn').addEventListener('click', async () => {
+  const url = document.getElementById('tiUrl').value.trim();
+  const title = document.getElementById('tiUrlTitle').value.trim();
+  
+  if (!url) {
+    alert('Please enter a URL');
+    return;
+  }
+  
+  const btn = document.getElementById('fetchUrlBtn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching...';
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/threat-intel/url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, title }),
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+      alert('Threat intel fetched successfully!');
+      document.getElementById('tiUrl').value = '';
+      document.getElementById('tiUrlTitle').value = '';
+      await loadThreatIntelList();
+    } else {
+      alert('Error: ' + data.error);
+    }
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+  
+  btn.disabled = false;
+  btn.textContent = 'Fetch Article';
+});
+
+async function loadThreatIntelList() {
+  try {
+    const res = await fetch(`${API_BASE}/api/threat-intel`);
+    const items = await res.json();
+    
+    if (items.length === 0) {
+      elements2.threatIntelList.innerHTML = '<p style="color: var(--text-muted)">No threat intel loaded</p>';
+      return;
+    }
+    
+    elements2.threatIntelList.innerHTML = items.map(item => `
+      <div class="item-row">
+        <div class="item-info">
+          <strong>${escapeHtml(item.title)}</strong>
+          <span class="item-meta">${item.source_type} • ${new Date(item.created_at).toLocaleString()}</span>
+          ${item.url ? `<span class="item-url">${escapeHtml(item.url)}</span>` : ''}
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-secondary btn-sm" onclick="viewThreatIntel(${item.id})">View</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteThreatIntel(${item.id})">Delete</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load threat intel:', err);
+  }
+}
+
+async function viewThreatIntel(id) {
+  try {
+    const res = await fetch(`${API_BASE}/api/threat-intel/${id}`);
+    const item = await res.json();
+    
+    const viewer = window.open('', '_blank');
+    viewer.document.write(`
+      <html>
+      <head><title>${escapeHtml(item.title)}</title>
+      <style>
+        body { font-family: system-ui; max-width: 900px; margin: 0 auto; padding: 20px; white-space: pre-wrap; }
+      </style>
+      </head>
+      <body>${escapeHtml(item.content)}</body>
+      </html>
+    `);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function deleteThreatIntel(id) {
+  if (!confirm('Delete this threat intel?')) return;
+  
+  try {
+    await fetch(`${API_BASE}/api/threat-intel/${id}`, { method: 'DELETE' });
+    await loadThreatIntelList();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+document.getElementById('analyzeBtn').addEventListener('click', async () => {
+  const res = await fetch(`${API_BASE}/api/config/ollama`);
+  const config = await res.json();
+  
+  document.getElementById('ollamaUrl').value = config.url || 'http://localhost:11434';
+  document.getElementById('ollamaModel').value = config.model || 'llama3';
+  
+  document.getElementById('analysisStatus').innerHTML = '';
+  openModal(elements2.analyzeModal);
+});
+
+document.getElementById('closeAnalyze').addEventListener('click', () => closeModal(elements2.analyzeModal));
+document.getElementById('cancelAnalyze').addEventListener('click', () => closeModal(elements2.analyzeModal));
+
+document.getElementById('startAnalysis').addEventListener('click', async () => {
+  const scope = document.getElementById('analysisScope').value;
+  const customPrompt = document.getElementById('customPrompt').value.trim();
+  
+  const statusDiv = document.getElementById('analysisStatus');
+  statusDiv.innerHTML = '<div class="loading-spinner">Analyzing with AI...</div>';
+  
+  document.getElementById('startAnalysis').disabled = true;
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: { logLimit: scope === 'all' ? 10000 : parseInt(scope) },
+        customPrompt: customPrompt || null
+      }),
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+      statusDiv.innerHTML = '<p style="color: var(--success)">Analysis complete!</p>';
+      closeModal(elements2.analyzeModal);
+      showReport(data.report.id);
+    } else {
+      statusDiv.innerHTML = `<p style="color: var(--error)">Error: ${data.error}</p>`;
+    }
+  } catch (err) {
+    statusDiv.innerHTML = `<p style="color: var(--error)">Error: ${err.message}</p>`;
+  }
+  
+  document.getElementById('startAnalysis').disabled = false;
+});
+
+async function showReport(id) {
+  try {
+    const res = await fetch(`${API_BASE}/api/reports/${id}`);
+    const report = await res.json();
+    
+    elements2.reportContent.innerHTML = marked.parse(report.content);
+    openModal(elements2.reportModal);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+document.getElementById('closeReport').addEventListener('click', () => closeModal(elements2.reportModal));
+document.getElementById('closeReportBtn').addEventListener('click', () => closeModal(elements2.reportModal));
+
+document.getElementById('reportsBtn').addEventListener('click', async () => {
+  await loadReportsList();
+  openModal(elements2.reportsListModal);
+});
+
+document.getElementById('closeReportsList').addEventListener('click', () => closeModal(elements2.reportsListModal));
+document.getElementById('closeReportsListBtn').addEventListener('click', () => closeModal(elements2.reportsListModal));
+
+async function loadReportsList() {
+  try {
+    const res = await fetch(`${API_BASE}/api/reports`);
+    const reports = await res.json();
+    
+    if (reports.length === 0) {
+      elements2.reportsList.innerHTML = '<p style="color: var(--text-muted)">No reports generated yet</p>';
+      return;
+    }
+    
+    elements2.reportsList.innerHTML = reports.map(report => `
+      <div class="item-row">
+        <div class="item-info">
+          <strong>${escapeHtml(report.title)}</strong>
+          <span class="item-meta">${report.logs_analyzed} logs • ${report.threat_intel_count} threat intel • ${new Date(report.created_at).toLocaleString()}</span>
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-primary btn-sm" onclick="showReport(${report.id})">View</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteReport(${report.id})">Delete</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load reports:', err);
+  }
+}
+
+async function deleteReport(id) {
+  if (!confirm('Delete this report?')) return;
+  
+  try {
+    await fetch(`${API_BASE}/api/reports/${id}`, { method: 'DELETE' });
+    await loadReportsList();
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+document.getElementById('chefBtn').addEventListener('click', () => {
+  window.open('https://gchq.github.io/Chef炒/', '_blank');
+});
+
+document.getElementById('ollamaConfigBtn').addEventListener('click', async () => {
+  const res = await fetch(`${API_BASE}/api/config/ollama`);
+  const config = await res.json();
+  
+  document.getElementById('ollamaUrl').value = config.url || 'http://localhost:11434';
+  document.getElementById('ollamaModel').value = config.model || 'llama3';
+  
+  openModal(elements2.ollamaConfigModal);
+});
+
+document.getElementById('closeOllamaConfig').addEventListener('click', () => closeModal(elements2.ollamaConfigModal));
+document.getElementById('cancelOllamaConfig').addEventListener('click', () => closeModal(elements2.ollamaConfigModal));
+
+document.getElementById('saveOllamaConfig').addEventListener('click', async () => {
+  const url = document.getElementById('ollamaUrl').value.trim();
+  const model = document.getElementById('ollamaModel').value.trim();
+  
+  await fetch(`${API_BASE}/api/config/ollama`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, model }),
+  });
+  
+  closeModal(elements2.ollamaConfigModal);
+  alert('Ollama configuration saved!');
+});
+
 loadLogs(1);
