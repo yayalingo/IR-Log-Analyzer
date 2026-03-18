@@ -123,22 +123,52 @@ body {
 
 .toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 16px;
   margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
-.toolbar-left {
+.btn-group {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-secondary);
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.btn-group-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 8px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.btn-group .btn {
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.btn-group .btn:first-of-type {
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.btn-group .btn:last-of-type {
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
 }
 
 .toolbar-filters {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .input, .select, .textarea {
@@ -1170,13 +1200,21 @@ body {
   font-size: 14px;
   color: var(--accent);
 }
+
+@media (max-width: 768px) {
   .toolbar {
     flex-direction: column;
     align-items: stretch;
   }
   
+  .btn-group {
+    width: 100%;
+    justify-content: center;
+  }
+  
   .toolbar-filters {
     flex-direction: column;
+    margin-left: 0;
   }
   
   .log-entry {

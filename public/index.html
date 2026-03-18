@@ -14,28 +14,42 @@
         <span class="badge" id="logCount">0 logs</span>
       </div>
       <div class="header-right">
-        <button class="btn btn-secondary" id="integrationsBtn">🔗 Integrations</button>
-        <button class="btn btn-secondary" id="ollamaConfigBtn">🤖 Ollama</button>
-        <button class="btn btn-secondary" id="configBtn">⚙️ Config</button>
-        <button class="btn btn-danger" id="clearBtn">Clear All</button>
+        <button class="btn btn-secondary" id="dashboardBtn">📈 Dashboard</button>
+        <button class="btn btn-secondary" id="configBtn">⚙️</button>
+        <button class="btn btn-danger" id="clearBtn">Clear</button>
       </div>
     </header>
 
     <div class="toolbar">
-      <div class="toolbar-left">
-        <button class="btn btn-primary" id="uploadBtn">📁 Upload File</button>
-        <button class="btn btn-primary" id="pasteBtn">📋 Paste Logs</button>
-        <button class="btn btn-secondary" id="exportBtn">📥 Export CSV</button>
-        <button class="btn btn-accent" id="threatIntelBtn">🛡️ Threat Intel</button>
-        <button class="btn btn-accent" id="analyzeBtn">🤖 AI Analyze</button>
-        <button class="btn btn-secondary" id="reportsBtn">📊 Reports</button>
-        <button class="btn btn-secondary" id="casesBtn">📁 Cases</button>
-        <button class="btn btn-secondary" id="iocMatchesBtn">🎯 IOC Matches</button>
-        <button class="btn btn-secondary" id="chefBtn">🔪 CyberChef</button>
-        <button class="btn btn-primary" id="dashboardBtn">📈 Dashboard</button>
+      <div class="btn-group">
+        <span class="btn-group-label">Import</span>
+        <button class="btn btn-primary" id="uploadBtn">📤 Upload</button>
+        <button class="btn btn-primary" id="pasteBtn">📋 Paste</button>
+        <button class="btn btn-secondary" id="exportBtn">📥 Export</button>
       </div>
+      
+      <div class="btn-group">
+        <span class="btn-group-label">Analysis</span>
+        <button class="btn btn-accent" id="threatIntelBtn">🛡️ Intel</button>
+        <button class="btn btn-accent" id="analyzeBtn">🤖 AI</button>
+        <button class="btn btn-secondary" id="reportsBtn">📊</button>
+      </div>
+      
+      <div class="btn-group">
+        <span class="btn-group-label">Cases</span>
+        <button class="btn btn-secondary" id="casesBtn">📁</button>
+        <button class="btn btn-secondary" id="iocMatchesBtn">🎯</button>
+      </div>
+      
+      <div class="btn-group">
+        <span class="btn-group-label">Tools</span>
+        <button class="btn btn-secondary" id="chefBtn">🔪</button>
+        <button class="btn btn-secondary" id="integrationsBtn">🔗</button>
+        <button class="btn btn-secondary" id="ollamaConfigBtn">🤖</button>
+      </div>
+      
       <div class="toolbar-filters">
-        <input type="text" id="searchInput" placeholder="Search logs..." class="input">
+        <input type="text" id="searchInput" placeholder="Search..." class="input">
         <select id="sourceFilter" class="input select">
           <option value="">All Sources</option>
         </select>
@@ -51,8 +65,8 @@
         <input type="datetime-local" id="startTime" class="input">
         <input type="datetime-local" id="endTime" class="input">
         <button class="btn btn-secondary" id="applyFilter">Apply</button>
-        <button class="btn btn-accent" id="selectModeBtn">☑️ Select</button>
-        <button class="btn btn-primary" id="addToCaseBtn" style="display:none;">➕ Add to Case</button>
+        <button class="btn btn-accent" id="selectModeBtn">Select</button>
+        <button class="btn btn-primary" id="addToCaseBtn" style="display:none;">+ Case</button>
       </div>
     </div>
 
