@@ -946,7 +946,7 @@ async function deleteReport(id) {
 }
 
 document.getElementById('chefBtn').addEventListener('click', () => {
-  window.open('https://gchq.github.io/Chef炒/', '_blank');
+  window.open('https://gchq.github.io/CyberChef/', '_blank');
 });
 
 document.getElementById('ollamaConfigBtn').addEventListener('click', async () => {

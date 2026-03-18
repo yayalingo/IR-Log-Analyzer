@@ -1152,7 +1152,7 @@ app.delete('/api/reports/:id', requireAuth, (req, res) => {
 });
 
 app.get('/api/chef', (req, res) => {
-  res.redirect('https://gchq.github.io/Chef炒/');
+  res.redirect('https://gchq.github.io/CyberChef/');
 });
 
 const MITRE_TECHNIQUES = {
